@@ -1,0 +1,169 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RoleDefault {
+  passenger
+  driver
+}
+
+enum AuthProvider {
+  google
+  apple
+}
+
+enum RideStatus {
+  open
+  ongoing
+  completed
+  cancelled
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  cancelled
+}
+
+enum PaymentStatus {
+  unpaid
+  paid
+  refunded
+}
+
+enum NotificationType {
+  ride_update
+  payment
+  system
+}
+
+model User {
+  id                   String           @id @default(uuid())
+  name                 String
+  email                String           @unique
+  phone                String?          @unique
+  passwordHash         String?
+  roleDefault          RoleDefault      @default(passenger)
+  providerAvatarUrl    String?
+  emailVerified        Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  oauthAccounts        OAuthAccount[]
+  driverProfile        DriverProfile?
+  rides                Ride[]           @relation("DriverRides")
+  bookings             Booking[]        @relation("PassengerBookings")
+  notifications        Notification[]
+  sosEvents            SosEvent[]
+}
+
+model OAuthAccount {
+  id               String       @id @default(uuid())
+  user             User         @relation(fields: [userId], references: [id])
+  userId           String
+  provider         AuthProvider
+  providerUserId   String
+  providerEmail    String
+  accessToken      String?
+  refreshToken     String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([provider, providerUserId])
+}
+
+model DriverProfile {
+  id            String   @id @default(uuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String   @unique
+  carMake       String?
+  carModel      String?
+  carColor      String?
+  plateNumber   String?
+  licenseNumber String?
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Ride {
+  id              String       @id @default(uuid())
+  driver          User         @relation("DriverRides", fields: [driverId], references: [id])
+  driverId        String
+  fromCity        String
+  fromLat         Float
+  fromLng         Float
+  toCity          String
+  toLat           Float
+  toLng           Float
+  startTime       DateTime
+  pricePerSeat    Decimal      @db.Decimal(10, 2)
+  seatsTotal      Int
+  seatsAvailable  Int
+  status          RideStatus   @default(open)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  bookings        Booking[]
+  sosEvents       SosEvent[]
+}
+
+model Booking {
+  id                       String         @id @default(uuid())
+  ride                     Ride           @relation(fields: [rideId], references: [id])
+  rideId                   String
+  passenger                User           @relation("PassengerBookings", fields: [passengerId], references: [id])
+  passengerId              String
+  seatsBooked              Int
+  status                   BookingStatus  @default(pending)
+  paymentStatus            PaymentStatus  @default(unpaid)
+  stripePaymentIntentId    String?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+
+  payments                 Payment[]
+}
+
+model Payment {
+  id                     String        @id @default(uuid())
+  booking                Booking       @relation(fields: [bookingId], references: [id])
+  bookingId              String
+  amount                 Decimal       @db.Decimal(10, 2)
+  currency               String        @default("cad")
+  stripePaymentIntentId  String
+  status                 PaymentStatus @default(unpaid)
+  createdAt              DateTime      @default(now())
+}
+
+model Notification {
+  id          String           @id @default(uuid())
+  user        User             @relation(fields: [userId], references: [id])
+  userId      String
+  title       String
+  body        String
+  type        NotificationType @default(system)
+  isRead      Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+}
+
+model SosEvent {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  ride      Ride?    @relation(fields: [rideId], references: [id])
+  rideId    String?
+  lat       Float
+  lng       Float
+  createdAt DateTime @default(now())
+}
