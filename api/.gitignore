@@ -3,3 +3,48 @@ node_modules
 .env
 
 /src/generated/prisma
+
+# Compiled output
+/dist
+/build
+/lib
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+
+# Testing
+/coverage
+/nyc_output
+
+# Debug / tooling
+.eslintcache
+
+# Local env overrides
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS files
+.DS_Store
+Thumbs.db
