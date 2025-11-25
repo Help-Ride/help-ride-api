@@ -1,5 +1,5 @@
 import { Router } from "express"
-import prisma from "../lib/prisma"
+import prisma from "../lib/prisma.js"
 import jwt from "jsonwebtoken"
 import { z } from "zod"
 
@@ -39,7 +39,7 @@ router.post("/oauth", async (req, res) => {
     const claims = await fakeVerifyIdToken(provider, id_token)
 
     // Find or create user
-    let oauthAccount = await prisma.oAuthAccount.findFirst({
+    let oAuthAccount = await prisma.oAuthAccount.findFirst({
       where: {
         provider,
         providerUserId: claims.providerUserId,
@@ -47,33 +47,34 @@ router.post("/oauth", async (req, res) => {
       include: { user: true },
     })
 
-    let user = oauthAccount?.user
+    let user = oAuthAccount?.user
 
     if (!user) {
       // Try to find user by email
-      const existingUser = await prisma.user.findUnique({
-        where: { email: claims.email },
-      })
+      user =
+        (await prisma.user.findUnique({
+          where: { email: claims.email },
+        })) ?? undefined
 
-      user ??= existingUser ?? undefined
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            email: claims.email,
+            name: claims.name,
+            emailVerified: true,
+            providerAvatarUrl: claims.avatarUrl,
+          },
+        })
+      }
 
-      user ??= await prisma.user.create({
-        data: {
-          email: claims.email,
-          name: claims.name,
-          emailVerified: true,
-          providerAvatarUrl: claims.avatarUrl,
-        },
-      })
-
-      // create linked oauth account; no need to keep the returned value here
-      await prisma.oAuthAccount.create({
+      oAuthAccount = await prisma.oAuthAccount.create({
         data: {
           userId: user.id,
           provider,
           providerUserId: claims.providerUserId,
           providerEmail: claims.email,
         },
+        include: { user: true },
       })
     }
 

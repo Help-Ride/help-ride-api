@@ -1,50 +1,36 @@
-node_modules
-# Keep environment variables out of version control
+# dev
+.yarn/
+!.yarn/releases
+.vscode/*
+!.vscode/launch.json
+!.vscode/*.code-snippets
+.idea/workspace.xml
+.idea/usage.statistics.xml
+.idea/shelf
+
+# deps
+node_modules/
+
+# env
 .env
+.env.production
 
-/src/generated/prisma
-
-# Compiled output
-/dist
-/build
-/lib
-
-# TypeScript
-*.tsbuildinfo
-
-# Logs
-logs
+# logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Runtime data
-pids
-*.pid
-*.seed
-
-# Testing
-/coverage
-/nyc_output
-
-# Debug / tooling
-.eslintcache
-
-# Local env overrides
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDEs and editors
-.vscode/
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-
-# OS files
+# misc
 .DS_Store
-Thumbs.db
+.vercel
+
+/src/generated/prisma
+
+# TypeScript
+*.tsbuildinfo
+dist/
+build/
