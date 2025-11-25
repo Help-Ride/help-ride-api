@@ -15,6 +15,16 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "oksss", ts: new Date().toISOString() })
 })
 
+app.get("/api/db-check", async (_req, res) => {
+  try {
+    const result = await prisma.$queryRaw`SELECT 1 as ok`
+    res.json({ connected: true, result })
+  } catch (err) {
+    console.error("DB connection error:", err)
+    res.status(500).json({ connected: false, error: String(err) })
+  }
+})
+
 app.use("/api/auth", authRoutes)
 
 export default app
