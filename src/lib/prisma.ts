@@ -1,5 +1,5 @@
 // src/lib/prisma.ts
-import { PrismaClient } from "@prisma/client"
+import { PrismaClient } from "../generated/prisma/client.js"
 // If you're on Postgres, also:
 // import { PrismaPg } from '@prisma/adapter-pg'
 
