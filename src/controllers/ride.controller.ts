@@ -56,6 +56,9 @@ export async function createRide(req: AuthRequest, res: Response) {
     if (seatsTotal <= 0) {
       return res.status(400).json({ error: "seatsTotal must be > 0" })
     }
+    if (pricePerSeat < 0) {
+      return res.status(400).json({ error: "pricePerSeat must be >= 0" })
+    }
 
     const start = new Date(startTime)
     if (Number.isNaN(start.getTime())) {
