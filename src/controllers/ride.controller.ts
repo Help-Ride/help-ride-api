@@ -254,21 +254,34 @@ export async function updateRide(req: AuthRequest, res: Response) {
     }
 
     const updates = req.body as Partial<CreateRideBody>
+
+    // Prepare update data
+    const updateData: any = {
+      ...(updates.fromCity && { fromCity: updates.fromCity }),
+      ...(updates.fromLat != null && { fromLat: updates.fromLat }),
+      ...(updates.fromLng != null && { fromLng: updates.fromLng }),
+      ...(updates.toCity && { toCity: updates.toCity }),
+      ...(updates.toLat != null && { toLat: updates.toLat }),
+      ...(updates.toLng != null && { toLng: updates.toLng }),
+      ...(updates.startTime && { startTime: new Date(updates.startTime) }),
+      ...(updates.pricePerSeat != null && {
+        pricePerSeat: updates.pricePerSeat,
+      }),
+    }
+
+    if (updates.seatsTotal != null) {
+      updateData.seatsTotal = updates.seatsTotal;
+      // Adjust seatsAvailable proportionally
+      const delta = updates.seatsTotal - ride.seatsTotal;
+      let newSeatsAvailable = ride.seatsAvailable + delta;
+      // Clamp between 0 and updates.seatsTotal
+      newSeatsAvailable = Math.max(0, Math.min(newSeatsAvailable, updates.seatsTotal));
+      updateData.seatsAvailable = newSeatsAvailable;
+    }
+
     const updatedRide = await prisma.ride.update({
       where: { id },
-      data: {
-        ...(updates.fromCity && { fromCity: updates.fromCity }),
-        ...(updates.fromLat != null && { fromLat: updates.fromLat }),
-        ...(updates.fromLng != null && { fromLng: updates.fromLng }),
-        ...(updates.toCity && { toCity: updates.toCity }),
-        ...(updates.toLat != null && { toLat: updates.toLat }),
-        ...(updates.toLng != null && { toLng: updates.toLng }),
-        ...(updates.startTime && { startTime: new Date(updates.startTime) }),
-        ...(updates.pricePerSeat != null && {
-          pricePerSeat: updates.pricePerSeat,
-        }),
-        ...(updates.seatsTotal != null && { seatsTotal: updates.seatsTotal }),
-      },
+      data: updateData,
     })
 
     return res.json(updatedRide)
