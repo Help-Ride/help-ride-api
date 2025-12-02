@@ -166,7 +166,7 @@ export async function searchRides(req: AuthRequest, res: Response) {
 }
 
 /**
- * GET /api/rides/mine
+ * GET /api/rides/me/list
  * Driver's own rides
  */
 export async function getMyRides(req: AuthRequest, res: Response) {
