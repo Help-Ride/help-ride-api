@@ -10,7 +10,7 @@ if (!url) {
   throw new Error("DATABASE_URL is not set – check your .env")
 }
 
-console.log("Prisma using DATABASE_URL:", url) // ✅ TEMP: verify Neon URL shows up
+console.log("Prisma connected to Databse")
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient

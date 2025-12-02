@@ -1,8 +1,8 @@
 import express from "express"
 import cors from "cors"
 import dotenv from "dotenv"
-import authRoutes from "./routes/auth.routes.js"
 import prisma from "./lib/prisma.js"
+import { registerRoutes } from "./routes/index.js"
 
 dotenv.config()
 
@@ -25,6 +25,6 @@ app.get("/api/db-check", async (_req, res) => {
   }
 })
 
-app.use("/api/auth", authRoutes)
+registerRoutes(app)
 
 export default app
