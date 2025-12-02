@@ -15,12 +15,12 @@ const router = Router()
 // Public search (no auth required)
 router.get("/", searchRides)
 
+// Authenticated driver actions
+router.get("/me/list", authGuard, getMyRides)
+
 // Ride detail (no auth required for now)
 router.get("/:id", getRideById)
-
-// Authenticated driver actions
 router.post("/", authGuard, createRide)
-router.get("/me/list", authGuard, getMyRides)
 router.put("/:id", authGuard, updateRide)
 router.delete("/:id", authGuard, deleteRide)
 export default router
