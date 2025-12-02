@@ -1,6 +1,6 @@
-# @baseUrl = http://localhost:3000/api
-@baseUrl = https://help-ride-api.vercel.app/api
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDY5MDgxNiwiZXhwIjoxNzY0NjkxNzE2fQ.SAQQhFxf9AMQh9Hjmd9mvQ0P5T_Hh5mr67Yq_68NalI
+@baseUrl = http://localhost:3000/api
+# @baseUrl = https://help-ride-api.vercel.app/api
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDcwMzI4NCwiZXhwIjoxNzY0NzA0MTg0fQ.-C3t4mn8zX5BM4QCUdUAaFeoSIWAeG9_wBovQBI4_Tg
 ### HEALTH CHECK
 GET {{baseUrl}}/health
 Accept: application/json
@@ -32,3 +32,81 @@ Accept: application/json
 GET {{baseUrl}}/auth/me
 Authorization: Bearer invalid.token.123
 Accept: application/json
+
+###########################################
+### 🚗 CREATE RIDE  (requires driver token)
+###########################################
+POST {{baseUrl}}/rides
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-15T14:00:00.000Z",
+  "pricePerSeat": 20.5,
+  "seatsTotal": 3
+}
+
+###
+
+###########################################
+### 🔍 SEARCH RIDES (public)
+###########################################
+GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
+Accept: application/json
+
+###
+
+###########################################
+### 🚙 GET MY RIDES  (driver only)
+###########################################
+GET {{baseUrl}}/rides/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+@rideId = a807e5a8-80cc-497a-9b1e-bfb000396471
+
+###########################################
+### 🧭 GET RIDE BY ID
+###########################################
+# Replace with actual rideId from previous response:
+
+GET {{baseUrl}}/rides/{{rideId}}
+Accept: application/json
+
+###
+###########################################
+### ✏️ UPDATE RIDE (driver only)
+###########################################
+PUT {{baseUrl}}/rides/{{rideId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+    "fromCity": "Waterlo0",
+    "fromLat": 43.4643,
+    "fromLng": -80.5204,
+    "toCity": "Toronto",
+    "toLat": 43.6532,
+    "toLng": -79.3832,
+    "startTime": "2025-12-15T15:00:00.000Z",
+    "pricePerSeat": 22.5,
+    "seatsTotal": 4
+}
+
+###
+
+###########################################
+### 🗑️ DELETE RIDE (driver only)
+###########################################
+DELETE {{baseUrl}}/rides/{{rideId}}
+Authorization: Bearer {{accessToken}}
+
+###
