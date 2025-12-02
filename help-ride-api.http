@@ -1,6 +1,6 @@
-@baseUrl = http://localhost:3000/api
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDY5MDUzMiwiZXhwIjoxNzY0NjkxNDMyfQ.p8AtUf3TXrRTYc6wRe5wrukQvfMABw30iD2mXQ2V4i0
-
+# @baseUrl = http://localhost:3000/api
+@baseUrl = https://help-ride-api.vercel.app/api
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDY5MDgxNiwiZXhwIjoxNzY0NjkxNzE2fQ.SAQQhFxf9AMQh9Hjmd9mvQ0P5T_Hh5mr67Yq_68NalI
 ### HEALTH CHECK
 GET {{baseUrl}}/health
 Accept: application/json
