@@ -99,6 +99,9 @@ export async function searchRides(req: AuthRequest, res: Response) {
     const { fromCity, toCity, date, seats } = req.query
 
     const minSeats = seats ? Number(seats) : 1
+    if (seats && Number.isNaN(minSeats)) {
+      return res.status(400).json({ error: "Invalid seats parameter" })
+    }
     const filters: any = {
       status: "open",
       seatsAvailable: {
