@@ -1,6 +1,6 @@
-@baseUrl = http://localhost:3000/api
+@baseUrl = http://localhost:4000/api
 # @baseUrl = https://help-ride-api.vercel.app/api
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDcwMzI4NCwiZXhwIjoxNzY0NzA0MTg0fQ.-C3t4mn8zX5BM4QCUdUAaFeoSIWAeG9_wBovQBI4_Tg
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDg1NDI5MiwiZXhwIjoxNzY0ODU1MTkyfQ.DzYryEGnEKoq1iUsETSNtQL4uFPiVs6LG_alfZzHo-g
 ### HEALTH CHECK
 GET {{baseUrl}}/health
 Accept: application/json
@@ -15,7 +15,7 @@ Content-Type: application/json
     "provider": "google",
     "providerUserId": "google-1234567890",
     "email": "testuser@example.com",
-    "name": "Test User",
+    "name": "Test User2",
     "avatarUrl": "https://example.com/avatar.png"
 }
 
@@ -71,7 +71,7 @@ Accept: application/json
 
 ###
 
-@rideId = a807e5a8-80cc-497a-9b1e-bfb000396471
+@rideId = 8cc76017-9a9e-4b4d-88fa-6761c2de1685
 
 ###########################################
 ### 🧭 GET RIDE BY ID
@@ -108,5 +108,46 @@ Content-Type: application/json
 ###########################################
 DELETE {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
+
+
+###########################################
+### 🚗 SEARCH RIDES (pick one to book)
+###########################################
+GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
+Accept: application/json
+
+###
+
+###########################################
+### 📩 CREATE BOOKING (PASSENGER REQUESTS RIDE)
+###########################################
+POST {{baseUrl}}/bookings/{{rideId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "seats": 1
+}
+
+###
+
+###########################################
+### 👤 GET MY BOOKINGS (PASSENGER VIEW)
+###########################################
+GET {{baseUrl}}/bookings/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+###########################################
+### 🚘 DRIVER: GET BOOKINGS FOR A RIDE
+###########################################
+# Use driver's token here (not passenger's)
+@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDg1NDc1NywiZXhwIjoxNzY0ODU1NjU3fQ.10FE4Fik1iy0N20E9Z7PfGYp3st91TYBWqqpL82AQ-s
+
+GET {{baseUrl}}/bookings/ride/{{rideId}}
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
 
 ###
