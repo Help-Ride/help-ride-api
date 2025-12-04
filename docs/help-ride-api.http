@@ -7,6 +7,27 @@ Accept: application/json
 
 ###
 
+### REGISTER WITH EMAIL/PASSWORD
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Email User",
+  "email": "emailuser@example.com",
+  "password": "StrongPass123!"
+}
+
+###
+
+### LOGIN WITH EMAIL/PASSWORD
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "emailuser@example.com",
+  "password": "StrongPass1234!"
+}
+
 ### OAUTH LOGIN (GOOGLE)
 POST {{baseUrl}}/auth/oauth
 Content-Type: application/json

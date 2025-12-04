@@ -1,0 +1,443 @@
+{
+    "info": {
+        "name": "HelpRide API",
+        "_postman_id": "8b8f88f8-aaaa-bbbb-cccc-ddddeeeeffff",
+        "description": "Postman collection for HelpRide backend API (auth, rides, bookings).",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Auth",
+            "item": [
+                {
+                    "name": "Health Check",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/health",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "health"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Register with Email/Password",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Email User\",\n  \"email\": \"emailuser@example.com\",\n  \"password\": \"StrongPass123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/register",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "register"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Login with Email/Password",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"emailuser@example.com\",\n  \"password\": \"StrongPass123!\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/login",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "login"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "OAuth Login (Google)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"provider\": \"google\",\n  \"providerUserId\": \"google-1234567890\",\n  \"email\": \"testuser@example.com\",\n  \"name\": \"Test User\",\n  \"avatarUrl\": \"https://example.com/avatar.png\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/oauth",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "oauth"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Authenticated User",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/me",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "me"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Authenticated User (Invalid Token)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer invalid.token.123"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/me",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "me"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Rides",
+            "item": [
+                {
+                    "name": "Create Ride",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"startTime\": \"2025-12-15T14:00:00.000Z\",\n  \"pricePerSeat\": 20.5,\n  \"seatsTotal\": 3\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/rides",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "rides"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Search Rides",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "rides"
+                            ],
+                            "query": [
+                                {
+                                    "key": "fromCity",
+                                    "value": "Waterloo"
+                                },
+                                {
+                                    "key": "toCity",
+                                    "value": "Toronto"
+                                },
+                                {
+                                    "key": "seats",
+                                    "value": "1"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get My Rides (Driver)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/rides/me/list",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "rides",
+                                "me",
+                                "list"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Ride By ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/rides/{{rideId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "rides",
+                                "{{rideId}}"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Ride (Driver)",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"startTime\": \"2025-12-15T15:00:00.000Z\",\n  \"pricePerSeat\": 22.5,\n  \"seatsTotal\": 4\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/rides/{{rideId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "rides",
+                                "{{rideId}}"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Delete Ride (Driver)",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/rides/{{rideId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "rides",
+                                "{{rideId}}"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Bookings",
+            "item": [
+                {
+                    "name": "Create Booking (Passenger Requests Ride)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"seats\": 1\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/bookings/{{rideId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "{{rideId}}"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get My Bookings (Passenger)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/bookings/me/list",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "me",
+                                "list"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Bookings for Ride (Driver)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{driverAccessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/bookings/ride/{{rideId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "ride",
+                                "{{rideId}}"
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "https://help-ride-api.vercel.app/api"
+        },
+        {
+            "key": "accessToken",
+            "value": ""
+        },
+        {
+            "key": "driverAccessToken",
+            "value": ""
+        },
+        {
+            "key": "rideId",
+            "value": ""
+        }
+    ]
+}

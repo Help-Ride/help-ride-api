@@ -4,12 +4,12 @@ A production-ready, modular, scalable backend powering the **HelpRide** mobile a
 
 This service handles:
 
-- Authentication (Google / Apple OAuth)  
-- User profiles  
-- Ride creation, updates, deletion  
-- Ride search and detail pages  
-- Passenger booking system  
-- Seat availability + transactional safety  
+- Authentication (Google / Apple OAuth)
+- User profiles
+- Ride creation, updates, deletion
+- Ride search and detail pages
+- Passenger booking system
+- Seat availability + transactional safety
 - Notifications, payments, and SOS (upcoming)
 
 Built for Vercel serverless deployment using Express + Prisma + PostgreSQL.
@@ -18,15 +18,15 @@ Built for Vercel serverless deployment using Express + Prisma + PostgreSQL.
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Runtime | Node.js |
-| API Framework | Express.js |
-| Database ORM | Prisma |
-| Database | PostgreSQL (Neon) |
-| Auth | JWT (access + refresh tokens), OAuth (Google/Apple) |
-| Deployment | Vercel (serverless functions wrapper) |
-| Testing | VSCode REST Client (.http files) |
+| Layer         | Technology                                          |
+| ------------- | --------------------------------------------------- |
+| Runtime       | Node.js                                             |
+| API Framework | Express.js                                          |
+| Database ORM  | Prisma                                              |
+| Database      | PostgreSQL (Neon)                                   |
+| Auth          | JWT (access + refresh tokens), OAuth (Google/Apple) |
+| Deployment    | Vercel (serverless functions wrapper)               |
+| Testing       | VSCode REST Client (.http files)                    |
 
 ---
 
@@ -71,6 +71,20 @@ help-ride-api/
 
 ---
 
+## API Testing (VS Code REST Client)
+
+The file `docs/help-ride-api.http` contains ready-to-run examples for all endpoints.
+
+1. Install the “REST Client” extension in VS Code.
+2. Open `docs/help-ride-api.http`.
+3. Set `@baseUrl` to the desired environment:
+   - Local: `http://localhost:4000/api`
+   - Staging: `https://help-ride-api-git-feature-r-....vercel.app/api`
+   - Prod: `https://help-ride-api.vercel.app/api`
+4. Click **Send Request** above any block.
+
+---
+
 ## Prisma Schema
 
 See full schema inside `prisma/schema.prisma`.
@@ -79,30 +93,32 @@ See full schema inside `prisma/schema.prisma`.
 
 ## Authentication
 
-### OAuth Login  
+### OAuth Login
+
 `POST /api/auth/oauth`
 
-### Get Authenticated User  
-`GET /api/auth/me`  
+### Get Authenticated User
+
+`GET /api/auth/me`
 Requires `Authorization: Bearer <accessToken>`
 
 ---
 
 ## Rides API
 
-- `POST /api/rides` — create ride  
-- `GET /api/rides` — search rides  
-- `GET /api/rides/:id` — ride details  
-- `PATCH /api/rides/:id` — update ride  
-- `DELETE /api/rides/:id` — cancel/delete ride  
+- `POST /api/rides` — create ride
+- `GET /api/rides` — search rides
+- `GET /api/rides/:id` — ride details
+- `PATCH /api/rides/:id` — update ride
+- `DELETE /api/rides/:id` — cancel/delete ride
 
 ---
 
 ## Booking API
 
-- `POST /api/bookings/:rideId` — passenger books seats  
-- `GET /api/bookings/me/list` — passenger bookings  
-- `GET /api/bookings/ride/:rideId` — driver sees bookings  
+- `POST /api/bookings/:rideId` — passenger books seats
+- `GET /api/bookings/me/list` — passenger bookings
+- `GET /api/bookings/ride/:rideId` — driver sees bookings
 
 ---
 
@@ -131,7 +147,7 @@ npx prisma migrate dev
 ## Deployment (Vercel)
 
 - Runs `npm run build`
-- Wraps Express using serverless-http  
+- Wraps Express using serverless-http
 - Exposes all routes under `/api/*`
 
 ---
@@ -149,11 +165,11 @@ GET {{baseUrl}}/health
 
 ## Roadmap
 
-- Stripe payments  
-- Driver approvals  
-- Live location  
-- Ratings & reviews  
-- SOS workflow  
-- Admin dashboard  
+- Stripe payments
+- Driver approvals
+- Live location
+- Ratings & reviews
+- SOS workflow
+- Admin dashboard
 
 ---
