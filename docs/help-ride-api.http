@@ -1,0 +1,174 @@
+@baseUrl = http://localhost:4000/api
+# @baseUrl = https://help-ride-api.vercel.app/api
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDg1NDI5MiwiZXhwIjoxNzY0ODU1MTkyfQ.DzYryEGnEKoq1iUsETSNtQL4uFPiVs6LG_alfZzHo-g
+### HEALTH CHECK
+GET {{baseUrl}}/health
+Accept: application/json
+
+###
+
+### REGISTER WITH EMAIL/PASSWORD
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Email User",
+  "email": "emailuser@example.com",
+  "password": "StrongPass123!"
+}
+
+###
+
+### LOGIN WITH EMAIL/PASSWORD
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "emailuser@example.com",
+  "password": "StrongPass1234!"
+}
+
+### OAUTH LOGIN (GOOGLE)
+POST {{baseUrl}}/auth/oauth
+Content-Type: application/json
+
+{
+    "provider": "google",
+    "providerUserId": "google-1234567890",
+    "email": "testuser@example.com",
+    "name": "Test User2",
+    "avatarUrl": "https://example.com/avatar.png"
+}
+
+###
+
+### GET AUTHENTICATED USER
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### TEST INVALID TOKEN
+GET {{baseUrl}}/auth/me
+Authorization: Bearer invalid.token.123
+Accept: application/json
+
+###########################################
+### 🚗 CREATE RIDE  (requires driver token)
+###########################################
+POST {{baseUrl}}/rides
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-15T14:00:00.000Z",
+  "pricePerSeat": 20.5,
+  "seatsTotal": 3
+}
+
+###
+
+###########################################
+### 🔍 SEARCH RIDES (public)
+###########################################
+GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
+Accept: application/json
+
+###
+
+###########################################
+### 🚙 GET MY RIDES  (driver only)
+###########################################
+GET {{baseUrl}}/rides/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+@rideId = 8cc76017-9a9e-4b4d-88fa-6761c2de1685
+
+###########################################
+### 🧭 GET RIDE BY ID
+###########################################
+# Replace with actual rideId from previous response:
+
+GET {{baseUrl}}/rides/{{rideId}}
+Accept: application/json
+
+###
+###########################################
+### ✏️ UPDATE RIDE (driver only)
+###########################################
+PUT {{baseUrl}}/rides/{{rideId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+    "fromCity": "Waterlo0",
+    "fromLat": 43.4643,
+    "fromLng": -80.5204,
+    "toCity": "Toronto",
+    "toLat": 43.6532,
+    "toLng": -79.3832,
+    "startTime": "2025-12-15T15:00:00.000Z",
+    "pricePerSeat": 22.5,
+    "seatsTotal": 4
+}
+
+###
+
+###########################################
+### 🗑️ DELETE RIDE (driver only)
+###########################################
+DELETE {{baseUrl}}/rides/{{rideId}}
+Authorization: Bearer {{accessToken}}
+
+
+###########################################
+### 🚗 SEARCH RIDES (pick one to book)
+###########################################
+GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
+Accept: application/json
+
+###
+
+###########################################
+### 📩 CREATE BOOKING (PASSENGER REQUESTS RIDE)
+###########################################
+POST {{baseUrl}}/bookings/{{rideId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "seats": 1
+}
+
+###
+
+###########################################
+### 👤 GET MY BOOKINGS (PASSENGER VIEW)
+###########################################
+GET {{baseUrl}}/bookings/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+###########################################
+### 🚘 DRIVER: GET BOOKINGS FOR A RIDE
+###########################################
+# Use driver's token here (not passenger's)
+@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDg1NDc1NywiZXhwIjoxNzY0ODU1NjU3fQ.10FE4Fik1iy0N20E9Z7PfGYp3st91TYBWqqpL82AQ-s
+
+GET {{baseUrl}}/bookings/ride/{{rideId}}
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
