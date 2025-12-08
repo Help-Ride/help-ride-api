@@ -103,6 +103,16 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
       returnDateObj = d
     }
 
+    // Ensure returnDate is after or equal to preferredDate for round-trip journeys
+    if (
+      tripType === "round-trip" &&
+      returnDateObj &&
+      returnDateObj.getTime() < preferredDateObj.getTime()
+    ) {
+      return res
+        .status(400)
+        .json({ error: "returnDate must be after or equal to preferredDate for round-trip journeys" })
+    }
     const request = await prisma.rideRequest.create({
       data: {
         passengerId: req.userId,
