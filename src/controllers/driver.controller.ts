@@ -1,7 +1,40 @@
 // src/controllers/driver.controller.ts
 import type { Response } from "express"
+import { z } from "zod"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+
+// Zod validation schema for driver profile
+const driverProfileSchema = z.object({
+  carMake: z.string().min(1).max(100).optional(),
+  carModel: z.string().min(1).max(100).optional(),
+  carYear: z
+    .string()
+    .regex(/^\d{4}$/, "Car year must be a 4-digit number")
+    .refine((year) => {
+      const yearNum = parseInt(year, 10)
+      const currentYear = new Date().getFullYear()
+      return yearNum >= 1900 && yearNum <= currentYear + 1
+    }, "Car year must be between 1900 and next year")
+    .optional(),
+  carColor: z.string().min(1).max(50).optional(),
+  plateNumber: z
+    .string()
+    .min(2, "Plate number must be at least 2 characters")
+    .max(20, "Plate number must be at most 20 characters")
+    .regex(/^[A-Za-z0-9\s-]+$/, "Plate number can only contain letters, numbers, spaces, and hyphens")
+    .optional(),
+  licenseNumber: z
+    .string()
+    .min(5, "License number must be at least 5 characters")
+    .max(50, "License number must be at most 50 characters")
+    .optional(),
+  insuranceInfo: z
+    .string()
+    .min(1)
+    .max(500, "Insurance info must be at most 500 characters")
+    .optional(),
+})
 
 interface DriverProfileBody {
   carMake?: string
@@ -35,16 +68,27 @@ export async function createDriverProfile(req: AuthRequest, res: Response) {
 
     const body = (req.body ?? {}) as DriverProfileBody
 
+    // Validate input using Zod schema
+    const validationResult = driverProfileSchema.safeParse(body)
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: validationResult.error.flatten().fieldErrors,
+      })
+    }
+
+    const validatedData = validationResult.data
+
     const profile = await prisma.driverProfile.create({
       data: {
         userId: req.userId,
-        carMake: body.carMake ?? null,
-        carModel: body.carModel ?? null,
-        carYear: body.carYear ?? null,
-        carColor: body.carColor ?? null,
-        plateNumber: body.plateNumber ?? null,
-        licenseNumber: body.licenseNumber ?? null,
-        insuranceInfo: body.insuranceInfo ?? null,
+        carMake: validatedData.carMake ?? null,
+        carModel: validatedData.carModel ?? null,
+        carYear: validatedData.carYear ?? null,
+        carColor: validatedData.carColor ?? null,
+        plateNumber: validatedData.plateNumber ?? null,
+        licenseNumber: validatedData.licenseNumber ?? null,
+        insuranceInfo: validatedData.insuranceInfo ?? null,
       },
       include: {
         user: {
@@ -136,6 +180,17 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
 
     const body = (req.body ?? {}) as DriverProfileBody
 
+    // Validate input using Zod schema
+    const validationResult = driverProfileSchema.safeParse(body)
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: validationResult.error.flatten().fieldErrors,
+      })
+    }
+
+    const validatedData = validationResult.data
+
     // Build update data, allowing fields to be cleared (set to null or empty string)
     const updateData: Record<string, any> = {};
     const fields: (keyof DriverProfileBody)[] = [
@@ -148,8 +203,8 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
       "insuranceInfo",
     ];
     for (const field of fields) {
-      if (Object.prototype.hasOwnProperty.call(body, field)) {
-        updateData[field] = body[field];
+      if (Object.prototype.hasOwnProperty.call(validatedData, field)) {
+        updateData[field] = validatedData[field];
       } else {
         updateData[field] = existing[field];
       }
