@@ -367,19 +367,19 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       return res.status(200).json({ message: "Email already verified." })
     }
 
+    // Check brute-force protection before expiration to prevent unlimited attempts on expired tokens
+    if (user.emailVerifyOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
     if (
       !user.emailVerifyOtp ||
       !user.emailVerifyOtpExpiresAt ||
       user.emailVerifyOtpExpiresAt < new Date()
     ) {
       return res.status(400).json({ error: "OTP expired or not requested" })
-    }
-
-    // Optional: simple brute-force protection
-    if (user.emailVerifyOtpAttempts >= 5) {
-      return res.status(429).json({
-        error: "Too many attempts. Please request a new OTP.",
-      })
     }
 
     if (user.emailVerifyOtp !== otp) {
