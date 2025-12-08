@@ -16,6 +16,9 @@ CREATE TYPE "PaymentStatus" AS ENUM ('unpaid', 'paid', 'refunded');
 -- CreateEnum
 CREATE TYPE "NotificationType" AS ENUM ('ride_update', 'payment', 'system');
 
+-- CreateEnum
+CREATE TYPE "RideRequestStatus" AS ENUM ('pending', 'matched', 'cancelled', 'expired');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
@@ -142,6 +145,31 @@ CREATE TABLE "SosEvent" (
     CONSTRAINT "SosEvent_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "RideRequest" (
+    "id" TEXT NOT NULL,
+    "passengerId" TEXT NOT NULL,
+    "fromCity" TEXT NOT NULL,
+    "fromLat" DOUBLE PRECISION NOT NULL,
+    "fromLng" DOUBLE PRECISION NOT NULL,
+    "toCity" TEXT NOT NULL,
+    "toLat" DOUBLE PRECISION NOT NULL,
+    "toLng" DOUBLE PRECISION NOT NULL,
+    "preferredDate" TIMESTAMP(3) NOT NULL,
+    "preferredTime" TEXT,
+    "arrivalTime" TEXT,
+    "seatsNeeded" INTEGER NOT NULL,
+    "rideType" TEXT NOT NULL,
+    "tripType" TEXT NOT NULL,
+    "returnDate" TIMESTAMP(3),
+    "returnTime" TEXT,
+    "status" "RideRequestStatus" NOT NULL DEFAULT 'pending',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RideRequest_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
@@ -153,6 +181,18 @@ CREATE UNIQUE INDEX "OAuthAccount_provider_providerUserId_key" ON "OAuthAccount"
 
 -- CreateIndex
 CREATE UNIQUE INDEX "DriverProfile_userId_key" ON "DriverProfile"("userId");
+
+-- CreateIndex
+CREATE INDEX "RideRequest_status_idx" ON "RideRequest"("status");
+
+-- CreateIndex
+CREATE INDEX "RideRequest_fromCity_idx" ON "RideRequest"("fromCity");
+
+-- CreateIndex
+CREATE INDEX "RideRequest_toCity_idx" ON "RideRequest"("toCity");
+
+-- CreateIndex
+CREATE INDEX "RideRequest_passengerId_idx" ON "RideRequest"("passengerId");
 
 -- AddForeignKey
 ALTER TABLE "OAuthAccount" ADD CONSTRAINT "OAuthAccount_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -180,3 +220,6 @@ ALTER TABLE "SosEvent" ADD CONSTRAINT "SosEvent_userId_fkey" FOREIGN KEY ("userI
 
 -- AddForeignKey
 ALTER TABLE "SosEvent" ADD CONSTRAINT "SosEvent_rideId_fkey" FOREIGN KEY ("rideId") REFERENCES "Ride"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RideRequest" ADD CONSTRAINT "RideRequest_passengerId_fkey" FOREIGN KEY ("passengerId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
