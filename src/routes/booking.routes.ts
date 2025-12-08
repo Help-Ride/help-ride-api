@@ -1,6 +1,7 @@
 // src/routes/booking.routes.ts
 import { Router } from "express"
 import { authGuard } from "../middleware/auth.js"
+import { requireVerifiedEmail } from "../middleware/requireVerifiedEmail.js"
 import {
   createBooking,
   getMyBookings,
@@ -9,16 +10,13 @@ import {
 
 const router = Router()
 
-// Passenger books a ride
-// POST /api/bookings/:rideId
-router.post("/:rideId", authGuard, createBooking)
+// Passenger: create booking (must be logged in + verified)
+router.post("/:rideId", authGuard, requireVerifiedEmail, createBooking)
 
-// Passenger's own bookings
-// GET /api/bookings/me
+// Passenger: my bookings
 router.get("/me/list", authGuard, getMyBookings)
 
-// Driver view bookings for a specific ride
-// GET /api/bookings/ride/:rideId
+// Driver: view bookings for a ride
 router.get("/ride/:rideId", authGuard, getBookingsForRide)
 
 export default router

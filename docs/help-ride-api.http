@@ -1,46 +1,97 @@
+################################################
+### 🌐 ENVIRONMENT
+################################################
 @baseUrl = http://localhost:4000/api
 # @baseUrl = https://help-ride-api.vercel.app/api
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDg1NDI5MiwiZXhwIjoxNzY0ODU1MTkyfQ.DzYryEGnEKoq1iUsETSNtQL4uFPiVs6LG_alfZzHo-g
-### HEALTH CHECK
+
+# Fill these from responses as you test
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNDI1MywiZXhwIjoxNzY1MjE1MTUzfQ.tPh42sLg8VhOW23UGxv_t3Vh9gLucSnabMV6AjGsjxU
+@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNDI1MywiZXhwIjoxNzY1MjE1MTUzfQ.tPh42sLg8VhOW23UGxv_t3Vh9gLucSnabMV6AjGsjxU
+@rideId = 065fe7a9-cd0c-4e04-b831-23d776ae4e42
+@userId = f37d0a45-e0c1-4d7c-9f7c-b3b3cad0b311
+@email = patel.rishi3001@gmail.com
+@otp = 898767
+
+################################################
+### 🩺 HEALTH CHECK
+################################################
 GET {{baseUrl}}/health
 Accept: application/json
 
 ###
 
+################################################
+### 🔐 AUTH – EMAIL/PASSWORD + OTP
+################################################
+
 ### REGISTER WITH EMAIL/PASSWORD
+# Triggers an email OTP for verification.
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
 {
   "name": "Email User",
-  "email": "emailuser@example.com",
+  "email": "{{email}}",
   "password": "StrongPass123!"
 }
 
 ###
 
 ### LOGIN WITH EMAIL/PASSWORD
+# Use same email/password as above.
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "email": "emailuser@example.com",
-  "password": "StrongPass1234!"
+  "email": "{{email}}",
+  "password": "StrongPass123!"
 }
+
+###
+
+### RESEND EMAIL VERIFICATION OTP
+POST {{baseUrl}}/auth/verify-email/send-otp
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+###
+
+### VERIFY EMAIL WITH OTP
+# Replace {{otp}} with the 6-digit code from your email.
+POST {{baseUrl}}/auth/verify-email/verify-otp
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "otp": "{{otp}}"
+}
+
+###
+
+################################################
+### 🔐 AUTH – OAUTH
+################################################
 
 ### OAUTH LOGIN (GOOGLE)
 POST {{baseUrl}}/auth/oauth
 Content-Type: application/json
 
 {
-    "provider": "google",
-    "providerUserId": "google-1234567890",
-    "email": "testuser@example.com",
-    "name": "Test User2",
-    "avatarUrl": "https://example.com/avatar.png"
+  "provider": "google",
+  "providerUserId": "google-1234567890",
+  "email": "testuser@example.com",
+  "name": "Test User",
+  "avatarUrl": "https://example.com/avatar.png"
 }
 
 ###
+
+################################################
+### 👤 AUTH – CURRENT USER
+################################################
 
 ### GET AUTHENTICATED USER
 GET {{baseUrl}}/auth/me
@@ -54,9 +105,13 @@ GET {{baseUrl}}/auth/me
 Authorization: Bearer invalid.token.123
 Accept: application/json
 
-###########################################
-### 🚗 CREATE RIDE  (requires driver token)
-###########################################
+###
+
+################################################
+### 🚗 RIDES – DRIVER FLOW
+################################################
+
+### CREATE RIDE  (requires verified driver token)
 POST {{baseUrl}}/rides
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -75,73 +130,66 @@ Content-Type: application/json
 
 ###
 
-###########################################
-### 🔍 SEARCH RIDES (public)
-###########################################
+### SEARCH RIDES (PUBLIC)
 GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
 Accept: application/json
 
 ###
 
-###########################################
-### 🚙 GET MY RIDES  (driver only)
-###########################################
+### GET MY RIDES  (driver only)
 GET {{baseUrl}}/rides/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
 
-@rideId = 8cc76017-9a9e-4b4d-88fa-6761c2de1685
+### SET A RIDE ID FROM PREVIOUS RESPONSE
+# Example:
+# @rideId = 8cc76017-9a9e-4b4d-88fa-6761c2de1685
 
-###########################################
-### 🧭 GET RIDE BY ID
-###########################################
-# Replace with actual rideId from previous response:
 
+### GET RIDE BY ID
 GET {{baseUrl}}/rides/{{rideId}}
 Accept: application/json
 
 ###
-###########################################
-### ✏️ UPDATE RIDE (driver only)
-###########################################
+
+### UPDATE RIDE (driver only)
 PUT {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-    "fromCity": "Waterlo0",
-    "fromLat": 43.4643,
-    "fromLng": -80.5204,
-    "toCity": "Toronto",
-    "toLat": 43.6532,
-    "toLng": -79.3832,
-    "startTime": "2025-12-15T15:00:00.000Z",
-    "pricePerSeat": 22.5,
-    "seatsTotal": 4
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-15T15:00:00.000Z",
+  "pricePerSeat": 22.5,
+  "seatsTotal": 4
 }
 
 ###
 
-###########################################
-### 🗑️ DELETE RIDE (driver only)
-###########################################
+### DELETE / CANCEL RIDE (driver only)
 DELETE {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
 
+###
 
-###########################################
-### 🚗 SEARCH RIDES (pick one to book)
-###########################################
+################################################
+### 📩 BOOKINGS – PASSENGER & DRIVER
+################################################
+
+### SEARCH RIDES (pick one to book)
 GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
 Accept: application/json
 
 ###
 
-###########################################
-### 📩 CREATE BOOKING (PASSENGER REQUESTS RIDE)
-###########################################
+### CREATE BOOKING (PASSENGER REQUESTS RIDE)
 POST {{baseUrl}}/bookings/{{rideId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -152,23 +200,57 @@ Content-Type: application/json
 
 ###
 
-###########################################
-### 👤 GET MY BOOKINGS (PASSENGER VIEW)
-###########################################
+### GET MY BOOKINGS (PASSENGER)
 GET {{baseUrl}}/bookings/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
 
-###########################################
-### 🚘 DRIVER: GET BOOKINGS FOR A RIDE
-###########################################
-# Use driver's token here (not passenger's)
-@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDg1NDc1NywiZXhwIjoxNzY0ODU1NjU3fQ.10FE4Fik1iy0N20E9Z7PfGYp3st91TYBWqqpL82AQ-s
-
+### DRIVER: GET BOOKINGS FOR A RIDE
 GET {{baseUrl}}/bookings/ride/{{rideId}}
 Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
+
+###
+
+################################################
+### 🧑‍✈️ DRIVER PROFILE
+################################################
+
+# Set userId to the driver's user id (from /auth/me)
+
+### CREATE DRIVER PROFILE (current user)
+POST {{baseUrl}}/drivers
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "carMake": "Toyota",
+  "carModel": "Corolla",
+  "carYear": "2020",
+  "carColor": "White",
+  "plateNumber": "ABC-123",
+  "licenseNumber": "LIC-987654",
+  "insuranceInfo": "Intact Insurance - Policy #123456"
+}
+
+###
+
+### GET DRIVER PROFILE (by userId)
+GET {{baseUrl}}/drivers/{{userId}}
+Accept: application/json
+
+###
+
+### UPDATE DRIVER PROFILE
+PUT {{baseUrl}}/drivers/{{userId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "carColor": "Matt Black",
+  "carModel": "Corolla SE"
+}
 
 ###
