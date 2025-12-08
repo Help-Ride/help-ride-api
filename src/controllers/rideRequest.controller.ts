@@ -137,10 +137,6 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
     const rideTypeEnum = RIDE_TYPE_MAP[rideType];
     const tripTypeEnum = TRIP_TYPE_MAP[tripType];
 
-    if (!rideTypeEnum || !tripTypeEnum) {
-      return res.status(400).json({ error: "Invalid rideType or tripType" });
-    }
-
     const request = await prisma.rideRequest.create({
       data: {
         passengerId: req.userId,
@@ -204,7 +200,7 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     // Validate and set status filter
     if (status) {
       const isValidStatus = (s: string): s is typeof VALID_RIDE_REQUEST_STATUSES[number] => 
-        VALID_RIDE_REQUEST_STATUSES.includes(s as any);
+        (VALID_RIDE_REQUEST_STATUSES as readonly string[]).includes(s);
       
       if (!isValidStatus(status)) {
         return res.status(400).json({ 
