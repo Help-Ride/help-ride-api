@@ -200,9 +200,19 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     if (toCity) {
       where.toCity = { contains: toCity, mode: "insensitive" }
     }
-    if (status && VALID_RIDE_REQUEST_STATUSES.includes(status as any)) {
+    
+    // Validate and set status filter
+    if (status) {
+      const isValidStatus = (s: string): s is typeof VALID_RIDE_REQUEST_STATUSES[number] => 
+        VALID_RIDE_REQUEST_STATUSES.includes(s as any);
+      
+      if (!isValidStatus(status)) {
+        return res.status(400).json({ 
+          error: `Invalid status. Must be one of: ${VALID_RIDE_REQUEST_STATUSES.join(", ")}` 
+        });
+      }
       where.status = status;
-    } else if (!status) {
+    } else {
       where.status = "pending";
     }
 
