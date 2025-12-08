@@ -10,13 +10,13 @@ import {
 
 const router = Router()
 
-// Create driver profile for current user
+// Create driver profile (verified user only)
 router.post("/", authGuard, requireVerifiedEmail, createDriverProfile)
 
-// Public: get driver profile by userId
+// Public view by userId
 router.get("/:id", getDriverProfile)
 
-// Update driver profile (only owner)
+// Update own driver profile
 router.put("/:id", authGuard, requireVerifiedEmail, updateDriverProfile)
 
 export default router

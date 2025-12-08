@@ -1,6 +1,7 @@
 // src/routes/ride.routes.ts
 import { Router } from "express"
 import { authGuard } from "../middleware/auth.js"
+import { requireVerifiedEmail } from "../middleware/requireVerifiedEmail.js"
 import {
   createRide,
   searchRides,
@@ -12,15 +13,15 @@ import {
 
 const router = Router()
 
-// Public search (no auth required)
+// Public search
 router.get("/", searchRides)
+router.get("/:id", getRideById)
 
-// Authenticated driver actions
+// Driver-only, verified email
 router.get("/me/list", authGuard, getMyRides)
 
-// Ride detail (no auth required for now)
-router.get("/:id", getRideById)
-router.post("/", authGuard, createRide)
-router.put("/:id", authGuard, updateRide)
-router.delete("/:id", authGuard, deleteRide)
+router.post("/", authGuard, requireVerifiedEmail, createRide)
+router.put("/:id", authGuard, requireVerifiedEmail, updateRide)
+router.delete("/:id", authGuard, requireVerifiedEmail, deleteRide)
+
 export default router
