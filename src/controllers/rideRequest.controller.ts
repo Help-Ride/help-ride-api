@@ -85,13 +85,13 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
         .json({ error: "seatsNeeded must be a positive integer" })
     }
 
-    if (!["one-time", "recurring"].includes(rideType)) {
+    if (!Object.keys(RIDE_TYPE_MAP).includes(rideType)) {
       return res
         .status(400)
         .json({ error: "rideType must be one-time or recurring" })
     }
 
-    if (!["one-way", "round-trip"].includes(tripType)) {
+    if (!Object.keys(TRIP_TYPE_MAP).includes(tripType)) {
       return res
         .status(400)
         .json({ error: "tripType must be one-way or round-trip" })
