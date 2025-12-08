@@ -137,7 +137,6 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
