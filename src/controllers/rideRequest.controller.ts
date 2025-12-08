@@ -3,6 +3,18 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 
+const VALID_RIDE_REQUEST_STATUSES = ["pending", "matched", "cancelled", "expired"] as const;
+
+const RIDE_TYPE_MAP: Record<string, "one_time" | "recurring"> = {
+  "one-time": "one_time",
+  "recurring": "recurring",
+};
+
+const TRIP_TYPE_MAP: Record<string, "one_way" | "round_trip"> = {
+  "one-way": "one_way",
+  "round-trip": "round_trip",
+};
+
 interface RideRequestBody {
   fromCity?: string
   fromLat?: number
@@ -122,8 +134,12 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
     }
 
     // Convert from API format (hyphenated) to database enum format (underscored)
-    const rideTypeEnum = rideType === "one-time" ? "one_time" : "recurring"
-    const tripTypeEnum = tripType === "one-way" ? "one_way" : "round_trip"
+    const rideTypeEnum = RIDE_TYPE_MAP[rideType];
+    const tripTypeEnum = TRIP_TYPE_MAP[tripType];
+
+    if (!rideTypeEnum || !tripTypeEnum) {
+      return res.status(400).json({ error: "Invalid rideType or tripType" });
+    }
 
     const request = await prisma.rideRequest.create({
       data: {
@@ -184,8 +200,7 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     if (toCity) {
       where.toCity = { contains: toCity, mode: "insensitive" }
     }
-    const validStatuses = ["pending", "matched", "cancelled", "expired"];
-    if (status && validStatuses.includes(status)) {
+    if (status && VALID_RIDE_REQUEST_STATUSES.includes(status as any)) {
       where.status = status;
     } else if (!status) {
       where.status = "pending";
