@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs"
 import prisma from "../lib/prisma.js"
 import { signAccessToken, signRefreshToken } from "../lib/jwt.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { sendEmailVerificationOtp } from "../lib/email.js"
 
 interface OAuthBody {
   provider: "google" | "apple"
@@ -53,6 +54,13 @@ function buildAuthResponse(user: {
       refreshToken,
     },
   }
+}
+
+function generateEmailOtp() {
+  // 6-digit numeric OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+  return { otp, expiresAt }
 }
 
 /**
@@ -166,14 +174,28 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
 
     const passwordHash = await bcrypt.hash(password, 10)
 
+    const { otp, expiresAt } = generateEmailOtp()
+
     const user = await prisma.user.create({
       data: {
         name,
         email,
         passwordHash,
         roleDefault: "passenger",
-        emailVerified: false, // later add email verification flow
+        emailVerified: false,
+        emailVerifyOtp: otp,
+        emailVerifyOtpExpiresAt: expiresAt,
+        emailVerifyOtpAttempts: 0,
       },
+    })
+
+    // Fire & forget – errors logged but don't block response
+    sendEmailVerificationOtp({
+      email: user.email,
+      name: user.name,
+      otp,
+    }).catch((err) => {
+      console.error("Failed to send verification OTP", err)
     })
 
     const response = buildAuthResponse(user)
@@ -248,6 +270,134 @@ export async function getMe(req: AuthRequest, res: Response) {
     })
   } catch (err) {
     console.error("GET /auth/me error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/verify-email/send-otp
+ * Body: { email }
+ * Resend OTP if user exists and not verified.
+ */
+export async function sendEmailVerifyOtp(req: AuthRequest, res: Response) {
+  try {
+    const { email } = (req.body ?? {}) as { email?: string }
+
+    if (!email) {
+      return res.status(400).json({ error: "email is required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (!user) {
+      // Don't leak existence
+      return res.status(200).json({
+        message: "If an account exists for this email, an OTP has been sent.",
+      })
+    }
+
+    if (user.emailVerified) {
+      return res.status(200).json({
+        message: "Email is already verified.",
+      })
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerifyOtp: otp,
+        emailVerifyOtpExpiresAt: expiresAt,
+        emailVerifyOtpAttempts: 0,
+      },
+    })
+
+    await sendEmailVerificationOtp({
+      email: updated.email,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Verification OTP sent.",
+    })
+  } catch (err) {
+    console.error("POST /auth/verify-email/send-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/verify-email/verify-otp
+ * Body: { email, otp }
+ */
+export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
+  try {
+    const { email, otp } = (req.body ?? {}) as {
+      email?: string
+      otp?: string
+    }
+
+    if (!email || !otp) {
+      return res.status(400).json({ error: "email and otp are required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid email or OTP" })
+    }
+
+    if (user.emailVerified) {
+      return res.status(200).json({ message: "Email already verified." })
+    }
+
+    if (
+      !user.emailVerifyOtp ||
+      !user.emailVerifyOtpExpiresAt ||
+      user.emailVerifyOtpExpiresAt < new Date()
+    ) {
+      return res.status(400).json({ error: "OTP expired or not requested" })
+    }
+
+    // Optional: simple brute-force protection
+    if (user.emailVerifyOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
+    if (user.emailVerifyOtp !== otp) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerifyOtpAttempts: { increment: 1 },
+        },
+      })
+
+      return res.status(400).json({ error: "Invalid email or OTP" })
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        emailVerifyOtp: null,
+        emailVerifyOtpExpiresAt: null,
+        emailVerifyOtpAttempts: 0,
+      },
+    })
+
+    return res.status(200).json({
+      message: "Email verified successfully.",
+    })
+  } catch (err) {
+    console.error("POST /auth/verify-email/verify-otp error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
