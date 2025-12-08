@@ -72,6 +72,7 @@ model User {
   bookings             Booking[]        @relation("PassengerBookings")
   notifications        Notification[]
   sosEvents            SosEvent[]
+  rideRequests         RideRequest[]
 }
 
 model OAuthAccount {
@@ -174,4 +175,43 @@ model SosEvent {
   lat       Float
   lng       Float
   createdAt DateTime @default(now())
+}
+
+enum RideRequestStatus {
+  pending
+  matched
+  cancelled
+  expired
+}
+
+model RideRequest {
+  id             String            @id @default(uuid())
+  passenger      User              @relation(fields: [passengerId], references: [id])
+  passengerId    String
+
+  fromCity       String
+  fromLat        Float
+  fromLng        Float
+  toCity         String
+  toLat          Float
+  toLng          Float
+
+  preferredDate  DateTime
+  preferredTime  String?           // e.g. "08:00"
+  arrivalTime    String?           // optional preferred arrival
+
+  seatsNeeded    Int
+
+  // For now as strings: "one-time" | "recurring"
+  rideType       String            // you can later make this an enum
+  // "one-way" | "round-trip"
+  tripType       String
+
+  returnDate     DateTime?
+  returnTime     String?
+
+  status         RideRequestStatus @default(pending)
+
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 }

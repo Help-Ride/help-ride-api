@@ -5,12 +5,12 @@
 # @baseUrl = https://help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNDI1MywiZXhwIjoxNzY1MjE1MTUzfQ.tPh42sLg8VhOW23UGxv_t3Vh9gLucSnabMV6AjGsjxU
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNWI5ZDUxNy01MWRlLTRiNmUtYjBhOC1iODQwOWRhZmYxY2MiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIyMjM1MCwiZXhwIjoxNzY1MjIzMjUwfQ.7XWzlzztMNgtdTjfW-0C9tRr13E-Kvoa3MRvQfJShCU
 @driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNDI1MywiZXhwIjoxNzY1MjE1MTUzfQ.tPh42sLg8VhOW23UGxv_t3Vh9gLucSnabMV6AjGsjxU
 @rideId = 065fe7a9-cd0c-4e04-b831-23d776ae4e42
 @userId = f37d0a45-e0c1-4d7c-9f7c-b3b3cad0b311
 @email = patel.rishi3001@gmail.com
-@otp = 898767
+@otp = 895773
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -252,5 +252,59 @@ Content-Type: application/json
   "carColor": "Matt Black",
   "carModel": "Corolla SE"
 }
+
+###
+
+################################################
+### 📌 RIDE REQUESTS (WHEN NO MATCHING RIDES)
+################################################
+
+### CREATE RIDE REQUEST (PASSENGER, VERIFIED)
+POST {{baseUrl}}/ride-requests
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "preferredDate": "2025-12-20T08:00:00.000Z",
+  "preferredTime": "08:00",
+  "arrivalTime": "10:30",
+  "seatsNeeded": 1,
+  "rideType": "one-time",
+  "tripType": "one-way"
+}
+
+###
+
+### PUBLIC LIST RIDE REQUESTS (PENDING BY DEFAULT)
+GET {{baseUrl}}/ride-requests?fromCity=Waterloo&toCity=Toronto
+Accept: application/json
+
+###
+
+### MY RIDE REQUESTS (PASSENGER)
+GET {{baseUrl}}/ride-requests/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+# Set this from the list response
+@rideRequestId = 24a28eec-6c11-46dd-b774-a59f0cd605dd
+
+### GET SINGLE RIDE REQUEST (PUBLIC)
+GET {{baseUrl}}/ride-requests/{{rideRequestId}}
+Accept: application/json
+
+###
+
+### DELETE / CANCEL OWN RIDE REQUEST
+DELETE {{baseUrl}}/ride-requests/{{rideRequestId}}
+Authorization: Bearer {{accessToken}}
 
 ###
