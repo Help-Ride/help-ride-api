@@ -173,10 +173,11 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     if (toCity) {
       where.toCity = { contains: toCity, mode: "insensitive" }
     }
-    if (status) {
-      where.status = status
+    const validStatuses = ["pending", "matched", "cancelled", "expired"];
+    if (status && validStatuses.includes(status)) {
+      where.status = status;
     } else {
-      where.status = "pending"
+      where.status = "pending";
     }
 
     const requests = await prisma.rideRequest.findMany({
