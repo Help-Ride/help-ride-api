@@ -189,17 +189,27 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
       },
     })
 
-    // Fire & forget – errors logged but don't block response
-    sendEmailVerificationOtp({
-      email: user.email,
-      name: user.name,
-      otp,
-    }).catch((err) => {
-      console.error("Failed to send verification OTP", err)
-    })
+    // Attempt to send verification OTP email, notify user if it fails
+    let emailSendFailed = false;
+    try {
+      await sendEmailVerificationOtp({
+        email: user.email,
+        name: user.name,
+        otp,
+      });
+    } catch (err) {
+      console.error("Failed to send verification OTP", err);
+      emailSendFailed = true;
+    }
 
-    const response = buildAuthResponse(user)
-    return res.status(201).json(response)
+    const response = buildAuthResponse(user);
+    if (emailSendFailed) {
+      return res.status(201).json({
+        ...response,
+        warning: "Account created but email verification failed. Please request a new OTP."
+      });
+    }
+    return res.status(201).json(response);
   } catch (err) {
     console.error("POST /auth/register error", err)
     return res.status(500).json({ error: "Internal server error" })
