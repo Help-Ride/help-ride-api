@@ -184,6 +184,16 @@ enum RideRequestStatus {
   expired
 }
 
+enum RideType {
+  one_time
+  recurring
+}
+
+enum TripType {
+  one_way
+  round_trip
+}
+
 model RideRequest {
   id             String            @id @default(uuid())
   passenger      User              @relation(fields: [passengerId], references: [id])
@@ -202,10 +212,8 @@ model RideRequest {
 
   seatsNeeded    Int
 
-  // For now as strings: "one-time" | "recurring"
-  rideType       String            // you can later make this an enum
-  // "one-way" | "round-trip"
-  tripType       String
+  rideType       RideType
+  tripType       TripType
 
   returnDate     DateTime?
   returnTime     String?
@@ -214,4 +222,9 @@ model RideRequest {
 
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
+
+  @@index([status])
+  @@index([fromCity])
+  @@index([toCity])
+  @@index([passengerId])
 }

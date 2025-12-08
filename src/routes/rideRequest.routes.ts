@@ -12,11 +12,11 @@ import {
 
 const router = Router()
 
-// Passenger: my requests (auth)
-router.get("/me/list", authGuard, getMyRideRequests)
-
 // Public list/search
 router.get("/", listRideRequests)
+
+// Passenger: my requests (auth) - must come before /:id
+router.get("/me/list", authGuard, getMyRideRequests)
 
 // Public detail
 router.get("/:id", getRideRequestById)

@@ -67,7 +67,7 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
     }
 
     const seats = Number(seatsNeeded ?? 1)
-    if (!Number.isFinite(seats) || seats <= 0) {
+    if (!Number.isInteger(seats) || seats <= 0) {
       return res
         .status(400)
         .json({ error: "seatsNeeded must be a positive integer" })
@@ -92,6 +92,13 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
         .json({ error: "preferredDate must be a valid ISO date" })
     }
 
+    // Validate round-trip requires returnDate
+    if (tripType === "round-trip" && !returnDate) {
+      return res
+        .status(400)
+        .json({ error: "returnDate is required for round-trip journeys" })
+    }
+
     let returnDateObj: Date | null = null
     if (returnDate) {
       const d = new Date(returnDate)
@@ -102,6 +109,21 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
       }
       returnDateObj = d
     }
+
+    // Ensure returnDate is after or equal to preferredDate for round-trip journeys
+    if (
+      tripType === "round-trip" &&
+      returnDateObj &&
+      returnDateObj.getTime() < preferredDateObj.getTime()
+    ) {
+      return res
+        .status(400)
+        .json({ error: "returnDate must be after or equal to preferredDate for round-trip journeys" })
+    }
+
+    // Convert from API format (hyphenated) to database enum format (underscored)
+    const rideTypeEnum = rideType === "one-time" ? "one_time" : "recurring"
+    const tripTypeEnum = tripType === "one-way" ? "one_way" : "round_trip"
 
     const request = await prisma.rideRequest.create({
       data: {
@@ -116,8 +138,8 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
         preferredTime: preferredTime ?? null,
         arrivalTime: arrivalTime ?? null,
         seatsNeeded: seats,
-        rideType,
-        tripType,
+        rideType: rideTypeEnum,
+        tripType: tripTypeEnum,
         returnDate: returnDateObj,
         returnTime: returnTime ?? null,
         status: "pending",
@@ -127,7 +149,6 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -138,7 +159,7 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
 
     return res.status(201).json(request)
   } catch (err) {
-    console.error("POST /ride-requests error", err)
+    console.error("POST /api/ride-requests error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -158,15 +179,16 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     const where: any = {}
 
     if (fromCity) {
-      where.fromCity = { equals: fromCity, mode: "insensitive" }
+      where.fromCity = { contains: fromCity, mode: "insensitive" }
     }
     if (toCity) {
-      where.toCity = { equals: toCity, mode: "insensitive" }
+      where.toCity = { contains: toCity, mode: "insensitive" }
     }
-    if (status) {
-      where.status = status
-    } else {
-      where.status = "pending"
+    const validStatuses = ["pending", "matched", "cancelled", "expired"];
+    if (status && validStatuses.includes(status)) {
+      where.status = status;
+    } else if (!status) {
+      where.status = "pending";
     }
 
     const requests = await prisma.rideRequest.findMany({
@@ -185,7 +207,7 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
 
     return res.json(requests)
   } catch (err) {
-    console.error("GET /ride-requests error", err)
+    console.error("GET /api/ride-requests error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -207,7 +229,7 @@ export async function getMyRideRequests(req: AuthRequest, res: Response) {
 
     return res.json(requests)
   } catch (err) {
-    console.error("GET /ride-requests/me/list error", err)
+    console.error("GET /api/ride-requests/me/list error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -242,7 +264,7 @@ export async function getRideRequestById(req: AuthRequest, res: Response) {
 
     return res.json(request)
   } catch (err) {
-    console.error("GET /ride-requests/:id error", err)
+    console.error("GET /api/ride-requests/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -282,14 +304,14 @@ export async function deleteRideRequest(req: AuthRequest, res: Response) {
       })
     }
 
-    await prisma.rideRequest.update({
+    const updated = await prisma.rideRequest.update({
       where: { id },
       data: { status: "cancelled" },
     })
 
-    return res.status(204).send()
+    return res.status(200).json(updated)
   } catch (err) {
-    console.error("DELETE /ride-requests/:id error", err)
+    console.error("DELETE /api/ride-requests/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
