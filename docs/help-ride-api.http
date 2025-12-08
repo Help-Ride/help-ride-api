@@ -1,6 +1,6 @@
 @baseUrl = http://localhost:4000/api
 # @baseUrl = https://help-ride-api.vercel.app/api
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiYTI4OTQyMC1hMmRmLTQ0NmQtYWE1YS0wMWE0Zjc5YjkxMDAiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NDg1NDI5MiwiZXhwIjoxNzY0ODU1MTkyfQ.DzYryEGnEKoq1iUsETSNtQL4uFPiVs6LG_alfZzHo-g
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwNWQzZWJmYy04YzMzLTQ0NDAtODQyMS01MzBjNjcxMDE4MTQiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxMjQ0OSwiZXhwIjoxNzY1MjEzMzQ5fQ.21-7EfjAqxBA3HYI8vBn5QthHxvGPbc_pH3QZUhd_BI
 ### HEALTH CHECK
 GET {{baseUrl}}/health
 Accept: application/json
@@ -170,5 +170,50 @@ Accept: application/json
 GET {{baseUrl}}/bookings/ride/{{rideId}}
 Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
+
+###
+
+# @baseUrl = http://localhost:4000/api
+# @baseUrl = https://help-ride-api.vercel.app/api
+@userId = 105d3ebfc-8c33-4440-8421-530c6710181423
+
+###########################################
+### 🧑‍✈️ CREATE DRIVER PROFILE (current user)
+###########################################
+POST {{baseUrl}}/drivers
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "carMake": "Toyota",
+  "carModel": "Corolla",
+  "carYear": "2020",
+  "carColor": "White",
+  "plateNumber": "ABC-123",
+  "licenseNumber": "LIC-987654",
+  "insuranceInfo": "Intact Insurance - Policy #123456"
+}
+
+###
+
+###########################################
+### 📄 GET DRIVER PROFILE (by userId)
+###########################################
+GET {{baseUrl}}/drivers/{{userId}}
+Accept: application/json
+
+###
+
+###########################################
+### ✏ UPDATE DRIVER PROFILE
+###########################################
+PUT {{baseUrl}}/drivers/{{userId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "carColor": "Black",
+  "carModel": "Corolla SE"
+}
 
 ###
