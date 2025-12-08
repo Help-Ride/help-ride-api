@@ -292,12 +292,12 @@ export async function deleteRideRequest(req: AuthRequest, res: Response) {
       })
     }
 
-    await prisma.rideRequest.update({
+    const updated = await prisma.rideRequest.update({
       where: { id },
       data: { status: "cancelled" },
     })
 
-    return res.status(204).send()
+    return res.status(200).json(updated)
   } catch (err) {
     console.error("DELETE /ride-requests/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
