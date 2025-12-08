@@ -136,17 +136,28 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
 
     const body = (req.body ?? {}) as DriverProfileBody
 
+    // Build update data, allowing fields to be cleared (set to null or empty string)
+    const updateData: Record<string, any> = {};
+    const fields: (keyof DriverProfileBody)[] = [
+      "carMake",
+      "carModel",
+      "carYear",
+      "carColor",
+      "plateNumber",
+      "licenseNumber",
+      "insuranceInfo",
+    ];
+    for (const field of fields) {
+      if (Object.prototype.hasOwnProperty.call(body, field)) {
+        updateData[field] = body[field];
+      } else {
+        updateData[field] = existing[field];
+      }
+    }
+
     const updated = await prisma.driverProfile.update({
       where: { userId: id },
-      data: {
-        carMake: body.carMake ?? existing.carMake,
-        carModel: body.carModel ?? existing.carModel,
-        carYear: body.carYear ?? existing.carYear,
-        carColor: body.carColor ?? existing.carColor,
-        plateNumber: body.plateNumber ?? existing.plateNumber,
-        licenseNumber: body.licenseNumber ?? existing.licenseNumber,
-        insuranceInfo: body.insuranceInfo ?? existing.insuranceInfo,
-      },
+      data: updateData,
       include: {
         user: {
           select: {
