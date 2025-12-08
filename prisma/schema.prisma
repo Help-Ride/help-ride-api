@@ -33,7 +33,9 @@ enum RideStatus {
 enum BookingStatus {
   pending
   confirmed
-  cancelled
+  cancelled_by_passenger
+  cancelled_by_driver
+  completed
 }
 
 enum PaymentStatus {
@@ -128,20 +130,21 @@ model Ride {
 }
 
 model Booking {
-  id                       String         @id @default(uuid())
-  ride                     Ride           @relation(fields: [rideId], references: [id])
-  rideId                   String
-  passenger                User           @relation("PassengerBookings", fields: [passengerId], references: [id])
-  passengerId              String
-  seatsBooked              Int
-  status                   BookingStatus  @default(pending)
-  paymentStatus            PaymentStatus  @default(unpaid)
-  stripePaymentIntentId    String?
-  createdAt                DateTime       @default(now())
-  updatedAt                DateTime       @updatedAt
+  id                    String         @id @default(uuid())
+  ride                  Ride           @relation(fields: [rideId], references: [id])
+  rideId                String
+  passenger             User           @relation("PassengerBookings", fields: [passengerId], references: [id])
+  passengerId           String
+  seatsBooked           Int
+  status                BookingStatus  @default(pending)
+  paymentStatus         PaymentStatus  @default(unpaid)
+  stripePaymentIntentId String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
-  payments                 Payment[]
+  payments              Payment[]
 }
+
 
 model Payment {
   id                     String        @id @default(uuid())

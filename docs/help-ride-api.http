@@ -5,9 +5,9 @@
 # @baseUrl = https://help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNDI1MywiZXhwIjoxNzY1MjE1MTUzfQ.tPh42sLg8VhOW23UGxv_t3Vh9gLucSnabMV6AjGsjxU
-@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNDI1MywiZXhwIjoxNzY1MjE1MTUzfQ.tPh42sLg8VhOW23UGxv_t3Vh9gLucSnabMV6AjGsjxU
-@rideId = 065fe7a9-cd0c-4e04-b831-23d776ae4e42
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNzY0OSwiZXhwIjoxNzY1MjE4NTQ5fQ.y5yMIPbHg_IQqkcqpS8dM2MUIqt8PNhPYqz26WajeBQ
+@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNzY0OSwiZXhwIjoxNzY1MjE4NTQ5fQ.y5yMIPbHg_IQqkcqpS8dM2MUIqt8PNhPYqz26WajeBQ
+@rideId = c2a3c70b-10fa-4a67-a9e1-ac7fb9abe3f0
 @userId = f37d0a45-e0c1-4d7c-9f7c-b3b3cad0b311
 @email = patel.rishi3001@gmail.com
 @otp = 898767
@@ -252,5 +252,56 @@ Content-Type: application/json
   "carColor": "Matt Black",
   "carModel": "Corolla SE"
 }
+
+###
+
+################################################
+### ✅ BOOKING CONFIRMATION FLOW
+################################################
+
+# Assumptions:
+# - {{accessToken}} = passenger token (verified email)
+# - {{driverAccessToken}} = driver token (verified email)
+# - {{rideId}} = a ride created by the driver
+
+### 1) PASSENGER CREATES PENDING BOOKING
+POST {{baseUrl}}/bookings/{{rideId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "seats": 1
+}
+
+###
+
+### 2) PASSENGER: VIEW MY BOOKINGS (TO GET bookingId)
+GET {{baseUrl}}/bookings/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+# Set bookingId from previous response:
+@bookingId = a1c93971-2c20-463f-8cfa-469845367279
+
+### 3) DRIVER: VIEW BOOKINGS FOR THIS RIDE
+GET {{baseUrl}}/bookings/ride/{{rideId}}
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
+### 4a) DRIVER CONFIRMS BOOKING
+PUT {{baseUrl}}/bookings/{{bookingId}}/confirm
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
+### 4b) DRIVER REJECTS BOOKING (alternative path)
+PUT {{baseUrl}}/bookings/{{bookingId}}/reject
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
 
 ###
