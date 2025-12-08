@@ -158,10 +158,10 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     const where: any = {}
 
     if (fromCity) {
-      where.fromCity = { equals: fromCity, mode: "insensitive" }
+      where.fromCity = { contains: fromCity, mode: "insensitive" }
     }
     if (toCity) {
-      where.toCity = { equals: toCity, mode: "insensitive" }
+      where.toCity = { contains: toCity, mode: "insensitive" }
     }
     if (status) {
       where.status = status
