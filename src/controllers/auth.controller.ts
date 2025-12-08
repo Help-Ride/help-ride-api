@@ -190,26 +190,27 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
     })
 
     // Attempt to send verification OTP email, notify user if it fails
-    let emailSendFailed = false;
+    let emailSendFailed = false
     try {
       await sendEmailVerificationOtp({
         email: user.email,
         name: user.name,
         otp,
-      });
+      })
     } catch (err) {
-      console.error("Failed to send verification OTP", err);
-      emailSendFailed = true;
+      console.error("Failed to send verification OTP", err)
+      emailSendFailed = true
     }
 
-    const response = buildAuthResponse(user);
+    const response = buildAuthResponse(user)
     if (emailSendFailed) {
       return res.status(201).json({
         ...response,
-        warning: "Account created but email verification failed. Please request a new OTP."
-      });
+        warning:
+          "Account created but email verification failed. Please request a new OTP.",
+      })
     }
-    return res.status(201).json(response);
+    return res.status(201).json(response)
   } catch (err) {
     console.error("POST /auth/register error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -394,7 +395,7 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
         `Email verification failed: invalid OTP for userId=${user.id}, email=${user.email}, providedOtp=${otp}`
       )
       return res.status(400).json({ error: "Invalid email or OTP" })
-
+    }
     await prisma.user.update({
       where: { id: user.id },
       data: {
