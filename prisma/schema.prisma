@@ -214,4 +214,9 @@ model RideRequest {
 
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
+
+  @@index([status])
+  @@index([fromCity])
+  @@index([toCity])
+  @@index([passengerId])
 }
