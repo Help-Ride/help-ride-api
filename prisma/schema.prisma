@@ -89,9 +89,11 @@ model DriverProfile {
   userId        String   @unique
   carMake       String?
   carModel      String?
+  carYear       String?   // NEW
   carColor      String?
   plateNumber   String?
   licenseNumber String?
+  insuranceInfo String?   // NEW
   isVerified    Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
