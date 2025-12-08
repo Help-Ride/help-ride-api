@@ -390,8 +390,10 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
         },
       })
 
+      console.warn(
+        `Email verification failed: invalid OTP for userId=${user.id}, email=${user.email}, providedOtp=${otp}`
+      )
       return res.status(400).json({ error: "Invalid email or OTP" })
-    }
 
     await prisma.user.update({
       where: { id: user.id },
