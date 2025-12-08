@@ -57,14 +57,12 @@ const driverProfileSchema = z.object({
     .optional(),
 })
 
-interface DriverProfileBody {
-  carMake?: string
-  carModel?: string
-  carYear?: string
-  carColor?: string
-  plateNumber?: string
-  licenseNumber?: string
-  insuranceInfo?: string
+// Helper function to format Zod validation errors
+function formatValidationErrors(error: z.ZodError) {
+  return error.issues.map((err) => ({
+    field: err.path.join("."),
+    message: err.message,
+  }))
 }
 
 /**
@@ -91,13 +89,9 @@ export async function createDriverProfile(req: AuthRequest, res: Response) {
     const validationResult = driverProfileSchema.safeParse(req.body ?? {})
 
     if (!validationResult.success) {
-      const errors = validationResult.error.issues.map((err) => ({
-        field: err.path.join("."),
-        message: err.message,
-      }))
       return res.status(400).json({
         error: "Validation failed",
-        details: errors,
+        details: formatValidationErrors(validationResult.error),
       })
     }
 
@@ -206,13 +200,9 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
     const validationResult = driverProfileSchema.safeParse(req.body ?? {})
 
     if (!validationResult.success) {
-      const errors = validationResult.error.issues.map((err) => ({
-        field: err.path.join("."),
-        message: err.message,
-      }))
       return res.status(400).json({
         error: "Validation failed",
-        details: errors,
+        details: formatValidationErrors(validationResult.error),
       })
     }
 
