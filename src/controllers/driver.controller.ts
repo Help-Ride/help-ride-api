@@ -209,7 +209,7 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
     const body = validationResult.data
 
     // Build update data, allowing fields to be cleared (set to null or empty string)
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, string | null | undefined> = {};
     const fields: (keyof typeof body)[] = [
       "carMake",
       "carModel",
