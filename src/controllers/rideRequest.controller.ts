@@ -109,9 +109,10 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
       returnDateObj &&
       returnDateObj.getTime() < preferredDateObj.getTime()
     ) {
-      return res
-        .status(400)
-        .json({ error: "returnDate must be after or equal to preferredDate for round-trip journeys" })
+      return res.status(400).json({
+        error:
+          "returnDate must be after or equal to preferredDate for round-trip journeys",
+      })
     }
     const request = await prisma.rideRequest.create({
       data: {
@@ -172,11 +173,11 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     if (toCity) {
       where.toCity = { contains: toCity, mode: "insensitive" }
     }
-    const validStatuses = ["pending", "matched", "cancelled", "expired"];
+    const validStatuses = ["pending", "matched", "cancelled", "expired"]
     if (status && validStatuses.includes(status)) {
-      where.status = status;
+      where.status = status
     } else {
-      where.status = "pending";
+      where.status = "pending"
     }
 
     const requests = await prisma.rideRequest.findMany({
