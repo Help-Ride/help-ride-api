@@ -1,9 +1,11 @@
 {
     "info": {
+        "_postman_id": "f20ab8d4-25b3-4d2a-bf99-6e3baabf16c4",
         "name": "HelpRide API",
-        "_postman_id": "8b8f88f8-aaaa-bbbb-cccc-ddddeeeeffff",
-        "description": "Postman collection for HelpRide backend API (auth, rides, bookings).",
-        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+        "description": "Postman collection for HelpRide backend API (auth, email verification, rides, ride requests, driver profiles, bookings, user profile).",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "50579569",
+        "_collection_link": "https://rishhi-dev-5651936.postman.co/workspace/Rishi's-Workspace~b11e7c43-da00-443c-8cf6-b3f50b18bd37/collection/50579569-f20ab8d4-25b3-4d2a-bf99-6e3baabf16c4?action=share&source=collection_link&creator=50579569"
     },
     "item": [
         {
@@ -28,7 +30,8 @@
                                 "health"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Register with Email/Password",
@@ -42,7 +45,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"name\": \"Email User\",\n  \"email\": \"emailuser@example.com\",\n  \"password\": \"StrongPass123!\"\n}"
+                            "raw": "{\n  \"name\": \"Email User\",\n  \"email\": \"patel.rishi3001@gmail.com\",\n  \"password\": \"StrongPass123!\"\n}"
                         },
                         "url": {
                             "raw": "{{baseUrl}}/auth/register",
@@ -54,7 +57,8 @@
                                 "register"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Login with Email/Password",
@@ -68,7 +72,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"email\": \"emailuser@example.com\",\n  \"password\": \"StrongPass123!\"\n}"
+                            "raw": "{\n  \"email\": \"patel.rishi3001@gmail.com\",\n  \"password\": \"StrongPass123!\"\n}"
                         },
                         "url": {
                             "raw": "{{baseUrl}}/auth/login",
@@ -80,7 +84,8 @@
                                 "login"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "OAuth Login (Google)",
@@ -106,7 +111,72 @@
                                 "oauth"
                             ]
                         }
-                    }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Send Email Verification OTP",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"emailuser@example.com\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/verify-email/send-otp",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "verify-email",
+                                "send-otp"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Verify Email OTP",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"emailuser@example.com\",\n  \"code\": \"123456\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/auth/verify-email/verify-otp",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "verify-email",
+                                "verify-otp"
+                            ]
+                        }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Get Authenticated User",
@@ -132,7 +202,8 @@
                                 "me"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Get Authenticated User (Invalid Token)",
@@ -158,7 +229,8 @@
                                 "me"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 }
             ]
         },
@@ -181,7 +253,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"startTime\": \"2025-12-15T14:00:00.000Z\",\n  \"pricePerSeat\": 20.5,\n  \"seatsTotal\": 3\n}"
+                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"startTime\": \"2025-12-15T14:00:00.000Z\",\n  \"arrivalTime\": \"2025-12-15T16:30:00.000Z\",\n  \"pricePerSeat\": 20.5,\n  \"seatsTotal\": 3\n}"
                         },
                         "url": {
                             "raw": "{{baseUrl}}/rides",
@@ -192,7 +264,8 @@
                                 "rides"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Search Rides",
@@ -227,7 +300,8 @@
                                 }
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Get My Rides (Driver)",
@@ -254,7 +328,8 @@
                                 "list"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Get Ride By ID",
@@ -276,7 +351,8 @@
                                 "{{rideId}}"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Update Ride (Driver)",
@@ -294,7 +370,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"startTime\": \"2025-12-15T15:00:00.000Z\",\n  \"pricePerSeat\": 22.5,\n  \"seatsTotal\": 4\n}"
+                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"startTime\": \"2025-12-15T15:00:00.000Z\",\n  \"arrivalTime\": \"2025-12-15T17:00:00.000Z\",\n  \"pricePerSeat\": 22.5,\n  \"seatsTotal\": 4\n}"
                         },
                         "url": {
                             "raw": "{{baseUrl}}/rides/{{rideId}}",
@@ -306,7 +382,8 @@
                                 "{{rideId}}"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Delete Ride (Driver)",
@@ -328,7 +405,8 @@
                                 "{{rideId}}"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 }
             ]
         },
@@ -363,7 +441,8 @@
                                 "{{rideId}}"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Get My Bookings (Passenger)",
@@ -390,7 +469,8 @@
                                 "list"
                             ]
                         }
-                    }
+                    },
+                    "response": []
                 },
                 {
                     "name": "Get Bookings for Ride (Driver)",
@@ -417,7 +497,326 @@
                                 "{{rideId}}"
                             ]
                         }
-                    }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Confirm Booking (Driver)",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{driverAccessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/bookings/{{bookingId}}/confirm",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "{{bookingId}}",
+                                "confirm"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Reject Booking (Driver)",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{driverAccessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/bookings/{{bookingId}}/reject",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "bookings",
+                                "{{bookingId}}",
+                                "reject"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Ride Requests",
+            "item": [
+                {
+                    "name": "Create Ride Request",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"preferredDate\": \"2025-12-20T08:00:00.000Z\",\n  \"preferredTime\": \"08:00\",\n  \"arrivalTime\": \"10:30\",\n  \"seatsNeeded\": 1,\n  \"rideType\": \"one-time\",\n  \"tripType\": \"one-way\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/ride-requests",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "ride-requests"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Search Ride Requests (public)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/ride-requests?fromCity=Waterloo&toCity=Toronto&status=pending",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "ride-requests"
+                            ],
+                            "query": [
+                                {
+                                    "key": "fromCity",
+                                    "value": "Waterloo"
+                                },
+                                {
+                                    "key": "toCity",
+                                    "value": "Toronto"
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "pending"
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get My Ride Requests",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/ride-requests/me/list",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "ride-requests",
+                                "me",
+                                "list"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Ride Request By ID",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/ride-requests/{{rideRequestId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "ride-requests",
+                                "{{rideRequestId}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Cancel Ride Request (Passenger)",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/ride-requests/{{rideRequestId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "ride-requests",
+                                "{{rideRequestId}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Driver Profile",
+            "item": [
+                {
+                    "name": "Create Driver Profile (Become Driver)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"carMake\": \"Toyota\",\n  \"carModel\": \"Corolla\",\n  \"carYear\": \"2020\",\n  \"carColor\": \"White\",\n  \"plateNumber\": \"ABC-123\",\n  \"licenseNumber\": \"LIC-987654\",\n  \"insuranceInfo\": \"Intact Insurance - Policy #123456\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/drivers",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "drivers"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Driver Profile (By UserId)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/drivers/{{driverUserId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "drivers",
+                                "{{driverUserId}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Update Driver Profile",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"carColor\": \"Black\",\n  \"carModel\": \"Corolla SE\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/drivers/{{driverUserId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "drivers",
+                                "{{driverUserId}}"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Users",
+            "item": [
+                {
+                    "name": "Update My Profile",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"RIshhi Name\",\n  \"phone\": \"+1-226-000-0000\",\n  \"providerAvatarUrl\": \"https://example.com/new-avatar.png\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/users/{{userId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "users",
+                                "{{userId}}"
+                            ]
+                        }
+                    },
+                    "response": []
                 }
             ]
         }
@@ -425,7 +824,7 @@
     "variable": [
         {
             "key": "baseUrl",
-            "value": "https://help-ride-api.vercel.app/api"
+            "value": "https://dev-help-ride-api.vercel.app/api"
         },
         {
             "key": "accessToken",
@@ -437,6 +836,22 @@
         },
         {
             "key": "rideId",
+            "value": ""
+        },
+        {
+            "key": "bookingId",
+            "value": ""
+        },
+        {
+            "key": "rideRequestId",
+            "value": ""
+        },
+        {
+            "key": "userId",
+            "value": ""
+        },
+        {
+            "key": "driverUserId",
             "value": ""
         }
     ]
