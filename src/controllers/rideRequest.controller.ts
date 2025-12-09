@@ -2,35 +2,88 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { Prisma } from "../generated/prisma/client.js"
 
-interface RideRequestBody {
+interface CreateRideBody {
   fromCity?: string
   fromLat?: number
   fromLng?: number
   toCity?: string
   toLat?: number
   toLng?: number
-  preferredDate?: string // ISO
-  preferredTime?: string
-  arrivalTime?: string
-  seatsNeeded?: number
-  rideType?: "one-time" | "recurring"
-  tripType?: "one-way" | "round-trip"
-  returnDate?: string
-  returnTime?: string
+  startTime?: string // ISO
+  arrivalTime?: string // ISO (optional)
+  pricePerSeat?: number
+  seatsTotal?: number
+}
+
+interface UpdateRideBody {
+  fromCity?: string
+  fromLat?: number
+  fromLng?: number
+  toCity?: string
+  toLat?: number
+  toLng?: number
+  startTime?: string
+  arrivalTime?: string // ISO (optional, nullable)
+  pricePerSeat?: number
+  seatsTotal?: number
+}
+
+function validateAndParseStartTime(startTime: string | undefined): {
+  date: Date | undefined
+  error: string | null
+} {
+  if (!startTime) {
+    return { date: undefined, error: null }
+  }
+  const d = new Date(startTime)
+  if (Number.isNaN(d.getTime())) {
+    return { date: undefined, error: "startTime must be a valid ISO date" }
+  }
+  return { date: d, error: null }
+}
+
+function validateAndParseArrivalTime(
+  arrivalTime: string | null | undefined,
+  startTimeDate: Date | undefined,
+  rideStartTime: Date
+): { date: Date | null | undefined; error: string | null } {
+  if (arrivalTime === undefined) {
+    return { date: undefined, error: null }
+  }
+
+  if (arrivalTime === null || arrivalTime === "") {
+    return { date: null, error: null }
+  }
+
+  const d = new Date(arrivalTime)
+  if (Number.isNaN(d.getTime())) {
+    return { date: undefined, error: "arrivalTime must be a valid ISO date" }
+  }
+
+  const baseStart = startTimeDate ?? rideStartTime
+  if (d.getTime() <= baseStart.getTime()) {
+    return {
+      date: undefined,
+      error: "arrivalTime must be after startTime",
+    }
+  }
+
+  return { date: d, error: null }
 }
 
 /**
  * POST /api/ride-requests
  * Create a ride request (passenger)
  */
-export async function createRideRequest(req: AuthRequest, res: Response) {
+export async function createRide(req: AuthRequest, res: Response) {
   try {
     if (!req.userId) {
       return res.status(401).json({ error: "Unauthorized" })
     }
 
-    const body = (req.body ?? {}) as RideRequestBody
+    const body = (req.body ?? {}) as CreateRideBody
 
     const {
       fromCity,
@@ -39,16 +92,13 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
       toCity,
       toLat,
       toLng,
-      preferredDate,
-      preferredTime,
+      startTime,
       arrivalTime,
-      seatsNeeded,
-      rideType,
-      tripType,
-      returnDate,
-      returnTime,
+      pricePerSeat,
+      seatsTotal,
     } = body
 
+    // Basic validation
     if (
       !fromCity ||
       typeof fromLat !== "number" ||
@@ -56,99 +106,142 @@ export async function createRideRequest(req: AuthRequest, res: Response) {
       !toCity ||
       typeof toLat !== "number" ||
       typeof toLng !== "number" ||
-      !preferredDate ||
-      !rideType ||
-      !tripType
+      !startTime ||
+      typeof pricePerSeat !== "number" ||
+      typeof seatsTotal !== "number"
     ) {
       return res.status(400).json({
         error:
-          "fromCity, fromLat, fromLng, toCity, toLat, toLng, preferredDate, rideType, and tripType are required",
+          "fromCity, fromLat, fromLng, toCity, toLat, toLng, startTime, pricePerSeat, and seatsTotal are required",
       })
     }
 
-    const seats = Number(seatsNeeded ?? 1)
-    if (!Number.isFinite(seats) || seats <= 0) {
+    const startTimeDate = new Date(startTime)
+    if (Number.isNaN(startTimeDate.getTime())) {
       return res
         .status(400)
-        .json({ error: "seatsNeeded must be a positive integer" })
+        .json({ error: "startTime must be a valid ISO date" })
     }
 
-    if (!["one-time", "recurring"].includes(rideType)) {
-      return res
-        .status(400)
-        .json({ error: "rideType must be one-time or recurring" })
-    }
-
-    if (!["one-way", "round-trip"].includes(tripType)) {
-      return res
-        .status(400)
-        .json({ error: "tripType must be one-way or round-trip" })
-    }
-
-    const preferredDateObj = new Date(preferredDate)
-    if (Number.isNaN(preferredDateObj.getTime())) {
-      return res
-        .status(400)
-        .json({ error: "preferredDate must be a valid ISO date" })
-    }
-
-    let returnDateObj: Date | null = null
-    if (returnDate) {
-      const d = new Date(returnDate)
+    let arrivalTimeDate: Date | null = null
+    if (arrivalTime) {
+      const d = new Date(arrivalTime)
       if (Number.isNaN(d.getTime())) {
         return res
           .status(400)
-          .json({ error: "returnDate must be a valid ISO date" })
+          .json({ error: "arrivalTime must be a valid ISO date" })
       }
-      returnDateObj = d
+      // Optional sanity: arrival after start
+      if (d.getTime() <= startTimeDate.getTime()) {
+        return res.status(400).json({
+          error: "arrivalTime must be after startTime",
+        })
+      }
+      arrivalTimeDate = d
     }
 
-    // Ensure returnDate is after or equal to preferredDate for round-trip journeys
-    if (
-      tripType === "round-trip" &&
-      returnDateObj &&
-      returnDateObj.getTime() < preferredDateObj.getTime()
-    ) {
-      return res.status(400).json({
-        error:
-          "returnDate must be after or equal to preferredDate for round-trip journeys",
-      })
-    }
-    const request = await prisma.rideRequest.create({
+    const ride = await prisma.ride.create({
       data: {
-        passengerId: req.userId,
+        driverId: req.userId,
         fromCity,
         fromLat,
         fromLng,
         toCity,
         toLat,
         toLng,
-        preferredDate: preferredDateObj,
-        preferredTime: preferredTime ?? null,
-        arrivalTime: arrivalTime ?? null,
-        seatsNeeded: seats,
-        rideType,
-        tripType,
-        returnDate: returnDateObj,
-        returnTime: returnTime ?? null,
-        status: "pending",
-      },
-      include: {
-        passenger: {
-          select: {
-            id: true,
-            name: true,
-            providerAvatarUrl: true,
-          },
-        },
+        startTime: startTimeDate,
+        arrivalTime: arrivalTimeDate,
+        pricePerSeat: new Prisma.Decimal(pricePerSeat),
+        seatsTotal,
+        seatsAvailable: seatsTotal,
+        status: "open",
       },
     })
 
-    // TODO later: trigger matching + notifications to drivers
-
-    return res.status(201).json(request)
+    return res.status(201).json(ride)
   } catch (err) {
-    console.error("POST /ride-requests error", err)
+    console.error("POST /rides error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+export async function updateRide(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id } = req.params
+    const body = (req.body ?? {}) as UpdateRideBody
+
+    const {
+      fromCity,
+      fromLat,
+      fromLng,
+      toCity,
+      toLat,
+      toLng,
+      startTime,
+      arrivalTime,
+      pricePerSeat,
+      seatsTotal,
+    } = body
+
+    const ride = await prisma.ride.findUnique({
+      where: { id },
+    })
+
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" })
+    }
+
+    if (ride.driverId !== req.userId) {
+      return res
+        .status(403)
+        .json({ error: "You are not the driver for this ride" })
+    }
+
+    const startTimeResult = validateAndParseStartTime(startTime)
+    if (startTimeResult.error) {
+      return res.status(400).json({ error: startTimeResult.error })
+    }
+
+    const arrivalTimeResult = validateAndParseArrivalTime(
+      arrivalTime,
+      startTimeResult.date,
+      ride.startTime
+    )
+    if (arrivalTimeResult.error) {
+      return res.status(400).json({ error: arrivalTimeResult.error })
+    }
+
+    const updated = await prisma.ride.update({
+      where: { id },
+      data: {
+        fromCity: fromCity ?? ride.fromCity,
+        fromLat: fromLat ?? ride.fromLat,
+        fromLng: fromLng ?? ride.fromLng,
+        toCity: toCity ?? ride.toCity,
+        toLat: toLat ?? ride.toLat,
+        toLng: toLng ?? ride.toLng,
+        startTime: startTimeResult.date ?? ride.startTime,
+        arrivalTime:
+          arrivalTimeResult.date !== undefined
+            ? arrivalTimeResult.date
+            : ride.arrivalTime,
+        pricePerSeat:
+          pricePerSeat !== undefined
+            ? new Prisma.Decimal(pricePerSeat)
+            : ride.pricePerSeat,
+        seatsTotal: seatsTotal ?? ride.seatsTotal,
+        // You can refine this later if you want smarter seat logic
+        seatsAvailable: ride.seatsAvailable,
+      },
+    })
+
+    return res.json(updated)
+  } catch (err) {
+    console.error("PUT /rides/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
