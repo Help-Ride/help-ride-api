@@ -125,10 +125,12 @@ Content-Type: application/json
   "toCity": "Toronto",
   "toLat": 43.6532,
   "toLng": -79.3832,
-  "startTime": "2025-12-15T14:00:00.000Z",
-  "arrivalTime": "2025-12-15T16:30:00.000Z",
-  "pricePerSeat": 20.5,
-  "seatsTotal": 3
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "arrivalTime": "2025-12-21T08:00:00.000Z",
+  "seatsTotal": 1,
+  "rideType": "one-time",
+  "tripType": "one-way",
+  "pricePerSeat":22
 }
 
 ###
@@ -141,11 +143,19 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "startTime": "2025-12-15T15:00:00.000Z",
-  "arrivalTime": "2025-12-15T17:00:00.000Z",
-  "pricePerSeat": 22.5
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "arrivalTime": "2025-12-21T08:00:00.000Z",
+  "seatsTotal": 1,
+  "rideType": "one-time",
+  "tripType": "one-way",
+  "pricePerSeat":22
 }
-
 
 ###
 
