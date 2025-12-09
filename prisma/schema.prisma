@@ -50,6 +50,32 @@ enum NotificationType {
   system
 }
 
+enum DriverDocumentType {
+  license
+  insurance
+  ownership
+  other
+}
+
+enum DriverDocumentStatus {
+  pending
+  approved
+  rejected
+}
+
+model DriverDocument {
+  id        String               @id @default(uuid())
+  user      User                 @relation(fields: [userId], references: [id])
+  userId    String
+  type      DriverDocumentType
+  s3Key     String
+  fileName  String
+  mimeType  String
+  status    DriverDocumentStatus @default(pending)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+}
+
 model User {
   id                        String           @id @default(uuid())
   name                      String
@@ -75,6 +101,7 @@ model User {
   notifications        Notification[]
   sosEvents            SosEvent[]
   rideRequests         RideRequest[]
+  driverDocuments      DriverDocument[]
 }
 
 model OAuthAccount {
