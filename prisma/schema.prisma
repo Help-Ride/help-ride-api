@@ -33,7 +33,9 @@ enum RideStatus {
 enum BookingStatus {
   pending
   confirmed
-  cancelled
+  cancelled_by_passenger
+  cancelled_by_driver
+  completed
 }
 
 enum PaymentStatus {
@@ -49,16 +51,22 @@ enum NotificationType {
 }
 
 model User {
-  id                   String           @id @default(uuid())
-  name                 String
-  email                String           @unique
-  phone                String?          @unique
-  passwordHash         String?
-  roleDefault          RoleDefault      @default(passenger)
-  providerAvatarUrl    String?
-  emailVerified        Boolean          @default(false)
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  id                        String           @id @default(uuid())
+  name                      String
+  email                     String           @unique
+  phone                     String?          @unique
+  passwordHash              String?
+  roleDefault               RoleDefault      @default(passenger)
+  providerAvatarUrl         String?
+  emailVerified             Boolean          @default(false)
+
+  // 🔽 NEW FIELDS FOR EMAIL OTP
+  emailVerifyOtp            String?
+  emailVerifyOtpExpiresAt   DateTime?
+  emailVerifyOtpAttempts    Int              @default(0)
+
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
 
   oauthAccounts        OAuthAccount[]
   driverProfile        DriverProfile?
@@ -66,6 +74,7 @@ model User {
   bookings             Booking[]        @relation("PassengerBookings")
   notifications        Notification[]
   sosEvents            SosEvent[]
+  rideRequests         RideRequest[]
 }
 
 model OAuthAccount {
@@ -89,9 +98,11 @@ model DriverProfile {
   userId        String   @unique
   carMake       String?
   carModel      String?
+  carYear       String?   // NEW
   carColor      String?
   plateNumber   String?
   licenseNumber String?
+  insuranceInfo String?   // NEW
   isVerified    Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -108,6 +119,7 @@ model Ride {
   toLat           Float
   toLng           Float
   startTime       DateTime
+  arrivalTime     DateTime?
   pricePerSeat    Decimal      @db.Decimal(10, 2)
   seatsTotal      Int
   seatsAvailable  Int
@@ -120,20 +132,21 @@ model Ride {
 }
 
 model Booking {
-  id                       String         @id @default(uuid())
-  ride                     Ride           @relation(fields: [rideId], references: [id])
-  rideId                   String
-  passenger                User           @relation("PassengerBookings", fields: [passengerId], references: [id])
-  passengerId              String
-  seatsBooked              Int
-  status                   BookingStatus  @default(pending)
-  paymentStatus            PaymentStatus  @default(unpaid)
-  stripePaymentIntentId    String?
-  createdAt                DateTime       @default(now())
-  updatedAt                DateTime       @updatedAt
+  id                    String         @id @default(uuid())
+  ride                  Ride           @relation(fields: [rideId], references: [id])
+  rideId                String
+  passenger             User           @relation("PassengerBookings", fields: [passengerId], references: [id])
+  passengerId           String
+  seatsBooked           Int
+  status                BookingStatus  @default(pending)
+  paymentStatus         PaymentStatus  @default(unpaid)
+  stripePaymentIntentId String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
-  payments                 Payment[]
+  payments              Payment[]
 }
+
 
 model Payment {
   id                     String        @id @default(uuid())
@@ -166,4 +179,48 @@ model SosEvent {
   lat       Float
   lng       Float
   createdAt DateTime @default(now())
+}
+
+enum RideRequestStatus {
+  pending
+  matched
+  cancelled
+  expired
+}
+
+model RideRequest {
+  id             String            @id @default(uuid())
+  passenger      User              @relation(fields: [passengerId], references: [id])
+  passengerId    String
+
+  fromCity       String
+  fromLat        Float
+  fromLng        Float
+  toCity         String
+  toLat          Float
+  toLng          Float
+
+  preferredDate  DateTime
+  preferredTime  String?           // e.g. "08:00"
+  arrivalTime    String?           // optional preferred arrival
+
+  seatsNeeded    Int
+
+  // For now as strings: "one-time" | "recurring"
+  rideType       String            // you can later make this an enum
+  // "one-way" | "round-trip"
+  tripType       String
+
+  returnDate     DateTime?
+  returnTime     String?
+
+  status         RideRequestStatus @default(pending)
+
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([status])
+  @@index([fromCity])
+  @@index([toCity])
+  @@index([passengerId])
 }
