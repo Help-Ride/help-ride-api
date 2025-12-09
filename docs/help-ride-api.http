@@ -5,10 +5,10 @@
 # @baseUrl = https://help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MzEyNSwiZXhwIjoxNzY1MjY0MDI1fQ.qrWgOJYszn2FLkiT2xGmS8HRI2PDy_PqxEOPM8qCr0o
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI4MzM4NiwiZXhwIjoxNzY1Mjg0Mjg2fQ.1bqLfkG3SCx3p4o5jA9VPtyNayYeY2VuB7RgtnTtyzA
 @driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
-@userId = 3a81a31f-9d7d-48ed-b512-b16a7b663025
+@userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @email = patel.rishi3001@gmail.com
 @otp = 332576
 
@@ -355,3 +355,21 @@ Content-Type: application/json
 }
 
 ###
+
+### 🔐 Get upload URL for driver document (license)
+POST {{baseUrl}}/drivers/{{userId}}/documents/presign
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "type": "license",
+  "fileName": "Rishi_logo.png",
+  "mimeType": "image/jpeg"
+}
+
+###
+
+### 📄 List my driver documents
+GET {{baseUrl}}/drivers/{{userId}}/documents
+Authorization: Bearer {{accessToken}}
+Accept: application/json
