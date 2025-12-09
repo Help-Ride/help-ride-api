@@ -117,6 +117,7 @@ model Ride {
   toLat           Float
   toLng           Float
   startTime       DateTime
+  arrivalTime     DateTime?
   pricePerSeat    Decimal      @db.Decimal(10, 2)
   seatsTotal      Int
   seatsAvailable  Int

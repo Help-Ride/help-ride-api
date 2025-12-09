@@ -5,10 +5,10 @@
 # @baseUrl = https://help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIyNTIwMSwiZXhwIjoxNzY1MjI2MTAxfQ.FJ0LuqIHB3Yrtj_RB9F7DfS1GkiGWrUCZ_b3zlCyjns
-@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNDI1MywiZXhwIjoxNzY1MjE1MTUzfQ.tPh42sLg8VhOW23UGxv_t3Vh9gLucSnabMV6AjGsjxU
+@accessToken =eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
+@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
 @rideId = 065fe7a9-cd0c-4e04-b831-23d776ae4e42
-@userId = f37d0a45-e0c1-4d7c-9f7c-b3b3cad0b311
+@userId = 3a81a31f-9d7d-48ed-b512-b16a7b663025
 @email = patel.rishi3001@gmail.com
 @otp = 895773
 
@@ -306,5 +306,23 @@ Accept: application/json
 ### DELETE / CANCEL OWN RIDE REQUEST
 DELETE {{baseUrl}}/ride-requests/{{rideRequestId}}
 Authorization: Bearer {{accessToken}}
+
+###
+
+
+################################################
+### 👤 USER PROFILE UPDATE
+################################################
+
+### UPDATE MY PROFILE
+PUT {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "phone": "+1-226-000-0000",
+  "providerAvatarUrl": "https://example.com/new-avatar.png"
+}
 
 ###
