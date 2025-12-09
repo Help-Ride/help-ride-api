@@ -5,12 +5,12 @@
 # @baseUrl = https://help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNzY0OSwiZXhwIjoxNzY1MjE4NTQ5fQ.y5yMIPbHg_IQqkcqpS8dM2MUIqt8PNhPYqz26WajeBQ
-@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmMzdkMGE0NS1lMGMxLTRkN2MtOWY3Yy1iM2IzY2FkMGIzMTEiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTIxNzY0OSwiZXhwIjoxNzY1MjE4NTQ5fQ.y5yMIPbHg_IQqkcqpS8dM2MUIqt8PNhPYqz26WajeBQ
-@rideId = c2a3c70b-10fa-4a67-a9e1-ac7fb9abe3f0
-@userId = f37d0a45-e0c1-4d7c-9f7c-b3b3cad0b311
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MzEyNSwiZXhwIjoxNzY1MjY0MDI1fQ.qrWgOJYszn2FLkiT2xGmS8HRI2PDy_PqxEOPM8qCr0o
+@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
+@rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
+@userId = 3a81a31f-9d7d-48ed-b512-b16a7b663025
 @email = patel.rishi3001@gmail.com
-@otp = 898767
+@otp = 332576
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -111,7 +111,9 @@ Accept: application/json
 ### 🚗 RIDES – DRIVER FLOW
 ################################################
 
-### CREATE RIDE  (requires verified driver token)
+###########################################
+### 🚗 CREATE RIDE  (requires driver token)
+###########################################
 POST {{baseUrl}}/rides
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -123,9 +125,36 @@ Content-Type: application/json
   "toCity": "Toronto",
   "toLat": 43.6532,
   "toLng": -79.3832,
-  "startTime": "2025-12-15T14:00:00.000Z",
-  "pricePerSeat": 20.5,
-  "seatsTotal": 3
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "arrivalTime": "2025-12-21T08:00:00.000Z",
+  "seatsTotal": 1,
+  "rideType": "one-time",
+  "tripType": "one-way",
+  "pricePerSeat":22
+}
+
+###
+
+###########################################
+### ✏️ UPDATE RIDE (driver only)
+###########################################
+PUT {{baseUrl}}/rides/{{rideId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "arrivalTime": "2025-12-21T08:00:00.000Z",
+  "seatsTotal": 1,
+  "rideType": "one-time",
+  "tripType": "one-way",
+  "pricePerSeat":22
 }
 
 ###
@@ -256,52 +285,73 @@ Content-Type: application/json
 ###
 
 ################################################
-### ✅ BOOKING CONFIRMATION FLOW
+### 📌 RIDE REQUESTS (WHEN NO MATCHING RIDES)
 ################################################
 
-# Assumptions:
-# - {{accessToken}} = passenger token (verified email)
-# - {{driverAccessToken}} = driver token (verified email)
-# - {{rideId}} = a ride created by the driver
-
-### 1) PASSENGER CREATES PENDING BOOKING
-POST {{baseUrl}}/bookings/{{rideId}}
+### CREATE RIDE REQUEST (PASSENGER, VERIFIED)
+POST {{baseUrl}}/ride-requests
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "seats": 1
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "preferredDate": "2025-12-20T08:00:00.000Z",
+  "preferredTime": "08:00",
+  "arrivalTime": "10:30",
+  "seatsNeeded": 1,
+  "rideType": "one-time",
+  "tripType": "one-way"
 }
 
 ###
 
-### 2) PASSENGER: VIEW MY BOOKINGS (TO GET bookingId)
-GET {{baseUrl}}/bookings/me/list
+### PUBLIC LIST RIDE REQUESTS (PENDING BY DEFAULT)
+GET {{baseUrl}}/ride-requests?fromCity=Waterloo&toCity=Toronto
+Accept: application/json
+
+###
+
+### MY RIDE REQUESTS (PASSENGER)
+GET {{baseUrl}}/ride-requests/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
 
-# Set bookingId from previous response:
-@bookingId = a1c93971-2c20-463f-8cfa-469845367279
+# Set this from the list response
+@rideRequestId = 24a28eec-6c11-46dd-b774-a59f0cd605dd
 
-### 3) DRIVER: VIEW BOOKINGS FOR THIS RIDE
-GET {{baseUrl}}/bookings/ride/{{rideId}}
-Authorization: Bearer {{driverAccessToken}}
+### GET SINGLE RIDE REQUEST (PUBLIC)
+GET {{baseUrl}}/ride-requests/{{rideRequestId}}
 Accept: application/json
 
 ###
 
-### 4a) DRIVER CONFIRMS BOOKING
-PUT {{baseUrl}}/bookings/{{bookingId}}/confirm
-Authorization: Bearer {{driverAccessToken}}
-Accept: application/json
+### DELETE / CANCEL OWN RIDE REQUEST
+DELETE {{baseUrl}}/ride-requests/{{rideRequestId}}
+Authorization: Bearer {{accessToken}}
 
 ###
 
-### 4b) DRIVER REJECTS BOOKING (alternative path)
-PUT {{baseUrl}}/bookings/{{bookingId}}/reject
-Authorization: Bearer {{driverAccessToken}}
-Accept: application/json
+
+################################################
+### 👤 USER PROFILE UPDATE
+################################################
+
+### UPDATE MY PROFILE
+PUT {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "phone": "+1-226-000-0000",
+  "providerAvatarUrl": "https://example.com/new-avatar.png"
+}
 
 ###
