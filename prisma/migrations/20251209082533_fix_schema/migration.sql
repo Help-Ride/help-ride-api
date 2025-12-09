@@ -8,7 +8,7 @@ CREATE TYPE "AuthProvider" AS ENUM ('google', 'apple');
 CREATE TYPE "RideStatus" AS ENUM ('open', 'ongoing', 'completed', 'cancelled');
 
 -- CreateEnum
-CREATE TYPE "BookingStatus" AS ENUM ('pending', 'confirmed', 'cancelled');
+CREATE TYPE "BookingStatus" AS ENUM ('pending', 'confirmed', 'cancelled_by_passenger', 'cancelled_by_driver', 'completed');
 
 -- CreateEnum
 CREATE TYPE "PaymentStatus" AS ENUM ('unpaid', 'paid', 'refunded');
@@ -82,6 +82,7 @@ CREATE TABLE "Ride" (
     "toLat" DOUBLE PRECISION NOT NULL,
     "toLng" DOUBLE PRECISION NOT NULL,
     "startTime" TIMESTAMP(3) NOT NULL,
+    "arrivalTime" TIMESTAMP(3),
     "pricePerSeat" DECIMAL(10,2) NOT NULL,
     "seatsTotal" INTEGER NOT NULL,
     "seatsAvailable" INTEGER NOT NULL,

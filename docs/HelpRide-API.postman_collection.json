@@ -162,7 +162,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"email\": \"emailuser@example.com\",\n  \"code\": \"123456\"\n}"
+                            "raw": "{\n  \"email\": \"patel.rishi3001@gmail.com\",\n  \"otp\": \"429980\"\n}"
                         },
                         "url": {
                             "raw": "{{baseUrl}}/auth/verify-email/verify-otp",
@@ -569,7 +569,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"preferredDate\": \"2025-12-20T08:00:00.000Z\",\n  \"preferredTime\": \"08:00\",\n  \"arrivalTime\": \"10:30\",\n  \"seatsNeeded\": 1,\n  \"rideType\": \"one-time\",\n  \"tripType\": \"one-way\"\n}"
+                            "raw": "{\n  \"fromCity\": \"Waterloo\",\n  \"fromLat\": 43.4643,\n  \"fromLng\": -80.5204,\n  \"toCity\": \"Toronto\",\n  \"toLat\": 43.6532,\n  \"toLng\": -79.3832,\n  \"startTime\": \"2025-12-20T08:00:00.000Z\",\n  \"arrivalTime\": \"2025-12-21T08:00:00.000Z\",\n  \"seatsTotal\": 1,\n  \"rideType\": \"one-time\",\n  \"tripType\": \"one-way\",\n  \"pricePerSeat\":22\n}"
                         },
                         "url": {
                             "raw": "{{baseUrl}}/ride-requests",
