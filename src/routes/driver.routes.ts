@@ -7,6 +7,10 @@ import {
   getDriverProfile,
   updateDriverProfile,
 } from "../controllers/driver.controller.js"
+import {
+  createDriverDocumentPresign,
+  listDriverDocuments,
+} from "../controllers/driverDocument.controller.js"
 
 const router = Router()
 
@@ -18,5 +22,9 @@ router.get("/:id", getDriverProfile)
 
 // Update own driver profile
 router.put("/:id", authGuard, requireVerifiedEmail, updateDriverProfile)
+
+// Driver documents (S3)
+router.post("/:id/documents/presign", authGuard, createDriverDocumentPresign)
+router.get("/:id/documents", authGuard, listDriverDocuments)
 
 export default router
