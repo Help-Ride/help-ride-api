@@ -1,16 +1,68 @@
 // src/controllers/driver.controller.ts
 import type { Response } from "express"
+import { z } from "zod"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 
-interface DriverProfileBody {
-  carMake?: string
-  carModel?: string
-  carYear?: string
-  carColor?: string
-  plateNumber?: string
-  licenseNumber?: string
-  insuranceInfo?: string
+// Zod schema for driver profile validation
+const driverProfileSchema = z.object({
+  carMake: z
+    .string()
+    .min(1, "Car make must not be empty")
+    .max(50, "Car make must not exceed 50 characters")
+    .optional(),
+  carModel: z
+    .string()
+    .min(1, "Car model must not be empty")
+    .max(50, "Car model must not exceed 50 characters")
+    .optional(),
+  carYear: z
+    .string()
+    .regex(/^\d{4}$/, "Car year must be a 4-digit number")
+    .refine(
+      (year) => {
+        const yearNum = parseInt(year, 10)
+        return yearNum >= 1900 && yearNum <= 2100
+      },
+      { message: "Car year must be between 1900 and 2100" }
+    )
+    .optional(),
+  carColor: z
+    .string()
+    .min(1, "Car color must not be empty")
+    .max(30, "Car color must not exceed 30 characters")
+    .optional(),
+  plateNumber: z
+    .string()
+    .min(1, "Plate number must not be empty")
+    .max(20, "Plate number must not exceed 20 characters")
+    .regex(
+      /^[A-Z0-9\-\s]+$/i,
+      "Plate number must contain only letters, numbers, hyphens, and spaces"
+    )
+    .optional(),
+  licenseNumber: z
+    .string()
+    .min(1, "License number must not be empty")
+    .max(30, "License number must not exceed 30 characters")
+    .regex(
+      /^[A-Z0-9\-]+$/i,
+      "License number must contain only letters, numbers, and hyphens"
+    )
+    .optional(),
+  insuranceInfo: z
+    .string()
+    .min(1, "Insurance info must not be empty")
+    .max(200, "Insurance info must not exceed 200 characters")
+    .optional(),
+})
+
+// Helper function to format Zod validation errors
+function formatValidationErrors(error: z.ZodError) {
+  return error.issues.map((err) => ({
+    field: err.path.join("."),
+    message: err.message,
+  }))
 }
 
 /**
@@ -33,7 +85,17 @@ export async function createDriverProfile(req: AuthRequest, res: Response) {
       })
     }
 
-    const body = (req.body ?? {}) as DriverProfileBody
+    // Validate request body with Zod
+    const validationResult = driverProfileSchema.safeParse(req.body ?? {})
+
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: formatValidationErrors(validationResult.error),
+      })
+    }
+
+    const body = validationResult.data
 
     const profile = await prisma.driverProfile.create({
       data: {
@@ -134,11 +196,21 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: "Driver profile not found" })
     }
 
-    const body = (req.body ?? {}) as DriverProfileBody
+    // Validate request body with Zod
+    const validationResult = driverProfileSchema.safeParse(req.body ?? {})
+
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: formatValidationErrors(validationResult.error),
+      })
+    }
+
+    const body = validationResult.data
 
     // Build update data, allowing fields to be cleared (set to null or empty string)
-    const updateData: Record<string, any> = {};
-    const fields: (keyof DriverProfileBody)[] = [
+    const updateData: Record<string, string | null | undefined> = {};
+    const fields: (keyof typeof body)[] = [
       "carMake",
       "carModel",
       "carYear",
