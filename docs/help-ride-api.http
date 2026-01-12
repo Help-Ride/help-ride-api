@@ -1,8 +1,8 @@
 ################################################
 ### 🌐 ENVIRONMENT
 ################################################
-@baseUrl = http://localhost:4000/api
-# @baseUrl = https://help-ride-api.vercel.app/api
+# @baseUrl = http://localhost:4000/api
+@baseUrl = https://dev-help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
 @accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI4MzM4NiwiZXhwIjoxNzY1Mjg0Mjg2fQ.1bqLfkG3SCx3p4o5jA9VPtyNayYeY2VuB7RgtnTtyzA
