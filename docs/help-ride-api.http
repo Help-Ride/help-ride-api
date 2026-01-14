@@ -5,11 +5,11 @@
 @baseUrl = https://dev-help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI4MzM4NiwiZXhwIjoxNzY1Mjg0Mjg2fQ.1bqLfkG3SCx3p4o5jA9VPtyNayYeY2VuB7RgtnTtyzA
-@refreshToken =
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2ODM1ODQ0OSwiZXhwIjoxNzY4MzU5MzQ5fQ.7LVErwr_pYqTKy1P4N2ADcialNwab6nJQkSEGOQv1CI
 @driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
 @bookingId =
+@conversationId =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @email = patel.rishi3001@gmail.com
 @otp = 332576
@@ -282,6 +282,73 @@ Accept: application/json
 PUT {{baseUrl}}/bookings/{{bookingId}}/reject
 Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
+
+###
+
+################################################
+### 💬 CHAT (PASSENGER ↔ DRIVER)
+################################################
+
+### CREATE / GET CONVERSATION (PASSENGER)
+POST {{baseUrl}}/chat/conversations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}"
+}
+
+###
+
+### CREATE / GET CONVERSATION (DRIVER)
+POST {{baseUrl}}/chat/conversations
+Authorization: Bearer {{driverAccessToken}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}",
+  "passengerId": "{{userId}}"
+}
+
+###
+
+### LIST MY CONVERSATIONS
+GET {{baseUrl}}/chat/conversations
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+# Set from conversation response
+# @conversationId = 00000000-0000-0000-0000-000000000000
+
+### LIST MESSAGES
+GET {{baseUrl}}/chat/conversations/{{conversationId}}/messages?limit=50
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### SEND MESSAGE
+POST {{baseUrl}}/chat/conversations/{{conversationId}}/messages
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "body": "Hey, I am at the pickup point."
+}
+
+###
+
+### PUSHER AUTH (PRIVATE CHANNEL)
+POST {{baseUrl}}/chat/pusher/auth
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "socket_id": "1234.5678",
+  "channel_name": "private-conversation-{{conversationId}}"
+}
 
 ###
 

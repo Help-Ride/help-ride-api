@@ -103,6 +103,9 @@ model User {
   rideRequests         RideRequest[]
   driverDocuments      DriverDocument[]
   refreshTokens        RefreshToken[]
+  passengerConversations Conversation[] @relation("PassengerConversations")
+  driverConversations    Conversation[] @relation("DriverConversations")
+  messages               Message[]
 }
 
 model OAuthAccount {
@@ -172,6 +175,7 @@ model Ride {
 
   bookings        Booking[]
   sosEvents       SosEvent[]
+  conversations   Conversation[]
 }
 
 model Booking {
@@ -222,6 +226,39 @@ model SosEvent {
   lat       Float
   lng       Float
   createdAt DateTime @default(now())
+}
+
+model Conversation {
+  id                 String    @id @default(uuid())
+  ride               Ride?     @relation(fields: [rideId], references: [id])
+  rideId             String?
+  passenger          User      @relation("PassengerConversations", fields: [passengerId], references: [id])
+  passengerId        String
+  driver             User      @relation("DriverConversations", fields: [driverId], references: [id])
+  driverId           String
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  messages           Message[]
+
+  @@index([passengerId])
+  @@index([driverId])
+  @@index([rideId])
+  @@unique([rideId, passengerId, driverId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
+  sender         User         @relation(fields: [senderId], references: [id])
+  senderId       String
+  body           String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 enum RideRequestStatus {

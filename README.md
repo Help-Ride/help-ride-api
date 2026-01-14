@@ -13,6 +13,7 @@ It powers Flutter clients for passengers and drivers, using PostgreSQL (Neon) + 
 - **Auth:** JWT (access + refresh), email/password, OAuth (Google / Apple-ready)
 - **Email:** Resend (for email verification OTP)
 - **Storage:** AWS S3 (driver documents)
+- **Realtime:** Pusher (chat)
 - **Deployment:** Vercel (Serverless API)
 - **Package Manager:** npm
 
@@ -27,7 +28,8 @@ help-ride-api/
 │  ├─ server.ts           # Server bootstrap
 │  ├─ lib/
 │  │  ├─ prisma.ts        # Prisma client
-│  │  └─ jwt.ts           # JWT helpers
+│  │  ├─ jwt.ts           # JWT helpers
+│  │  └─ pusher.ts        # Pusher client
 │  ├─ middleware/
 │  │  ├─ auth.ts          # Auth guard (JWT)
 │  │  └─ requireVerifiedEmail.ts # Enforce email verification for protected actions
@@ -37,6 +39,7 @@ help-ride-api/
 │  │  ├─ booking.controller.ts
 │  │  ├─ driver.controller.ts
 │  │  ├─ driverDocument.controller.ts
+│  │  ├─ chat.controller.ts
 │  │  ├─ rideRequest.controller.ts
 │  │  └─ user.controller.ts
 │  ├─ routes/
@@ -44,6 +47,7 @@ help-ride-api/
 │  │  ├─ ride.routes.ts
 │  │  ├─ booking.routes.ts
 │  │  ├─ driver.routes.ts
+│  │  ├─ chat.routes.ts
 │  │  ├─ rideRequest.routes.ts
 │  │  └─ user.routes.ts
 │  └─ types/              # Shared types (if any)
@@ -83,6 +87,12 @@ AWS_S3_BUCKET="your-bucket-name"
 AWS_REGION="us-east-1"
 AWS_ACCESS_KEY_ID="AKIA..."
 AWS_SECRET_ACCESS_KEY="..."
+
+# Pusher (Chat)
+PUSHER_APP_ID="your-app-id"
+PUSHER_KEY="your-key"
+PUSHER_SECRET="your-secret"
+PUSHER_CLUSTER="your-cluster"
 
 # App
 NODE_ENV="development"        # or "production"
@@ -208,6 +218,13 @@ enum RideRequestStatus {
 - `RefreshToken`  
   - `userId`, `tokenHash`, `expiresAt`, `revokedAt?`, `replacedByTokenId?`
 
+- `Conversation`  
+  - `rideId?`, `passengerId`, `driverId`  
+  - `lastMessageAt?`, `lastMessagePreview?`
+
+- `Message`  
+  - `conversationId`, `senderId`, `body`, `createdAt`
+
 > **Note**: The Prisma schema in `prisma/schema.prisma` is the source of truth. This section is an overview for devs.
 
 ---
@@ -260,6 +277,7 @@ Both are kept in sync with the implementation and include working examples for a
 - Email verification (OTP)
 - Driver profiles
 - Driver documents (S3 presign)
+- Chat (conversations + messages)
 - Rides (with `arrivalTime`)
 - Ride requests
 - Bookings (including driver confirm/reject)
@@ -661,6 +679,64 @@ Passenger booking → driver approval → seats updated.
 - Does **not** decrement seats.
 
 _Payment integration (Stripe) is planned but not implemented yet – booking/payment linkage is already modeled in `Booking` and `Payment`._
+
+---
+
+## Chat Module
+
+Passenger ↔ driver chat scoped to a ride, with realtime delivery via Pusher.
+
+### Create or Get Conversation
+
+`POST /api/chat/conversations` (JWT)
+
+```json
+{
+  "rideId": "ride-uuid",
+  "passengerId": "passenger-uuid"
+}
+```
+
+- Passenger can omit `passengerId` (it defaults to the current user).
+- Driver must provide `passengerId`.
+- Returns an existing conversation for the ride if one already exists.
+
+### List My Conversations
+
+`GET /api/chat/conversations` (JWT)
+
+- Returns conversations where the current user is the passenger or driver.
+
+### List Messages
+
+`GET /api/chat/conversations/:id/messages?limit=50&cursor=<messageId>` (JWT)
+
+- Returns newest messages first, plus `nextCursor` for pagination.
+
+### Send Message
+
+`POST /api/chat/conversations/:id/messages` (JWT)
+
+```json
+{
+  "body": "Hey, I am at the pickup point."
+}
+```
+
+- Creates the message and broadcasts `message:new` to the Pusher channel.
+
+### Pusher Auth (Private Channels)
+
+`POST /api/chat/pusher/auth` (JWT)
+
+```json
+{
+  "socket_id": "1234.5678",
+  "channel_name": "private-conversation-<conversationId>"
+}
+```
+
+- Only conversation participants can subscribe.
 
 ---
 
