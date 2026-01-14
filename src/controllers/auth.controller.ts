@@ -188,54 +188,8 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         },
       })
 
-      const { otp, expiresAt } = generateEmailOtp()
-      await prisma.user.update({
-        where: { id: updated.id },
-        data: {
-          emailVerifyOtp: otp,
-          emailVerifyOtpExpiresAt: expiresAt,
-          emailVerifyOtpAttempts: 0,
-        },
-      })
-
-      let emailSendFailed = false
-      try {
-        await sendEmailVerificationOtp({
-          email: updated.email,
-          name: updated.name,
-          otp,
-        })
-      } catch (err) {
-        console.error("Failed to send verification OTP", err)
-        emailSendFailed = true
-      }
-
-      if (emailSendFailed) {
-        return res.status(200).json({
-          message:
-            "Account updated but email verification failed. Please request a new OTP.",
-          user: {
-            id: updated.id,
-            name: updated.name,
-            email: updated.email,
-            roleDefault: updated.roleDefault,
-            providerAvatarUrl: updated.providerAvatarUrl,
-            emailVerified: updated.emailVerified,
-          },
-        })
-      }
-
-      return res.status(200).json({
-        message: "Verification OTP sent.",
-        user: {
-          id: updated.id,
-          name: updated.name,
-          email: updated.email,
-          roleDefault: updated.roleDefault,
-          providerAvatarUrl: updated.providerAvatarUrl,
-          emailVerified: updated.emailVerified,
-        },
-      })
+      const response = await buildAuthResponse(updated)
+      return res.status(200).json(response)
     }
 
     if (existing && existing.passwordHash) {
@@ -257,18 +211,8 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
       },
     })
 
-    // Attempt to send verification OTP email, notify user if it fails
-    return res.status(201).json({
-      message: "Verification OTP sent.",
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        roleDefault: user.roleDefault,
-        providerAvatarUrl: user.providerAvatarUrl,
-        emailVerified: user.emailVerified,
-      },
-    })
+    const response = await buildAuthResponse(user)
+    return res.status(201).json(response)
   } catch (err) {
     console.error("POST /auth/register error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -301,54 +245,8 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Invalid credentials" })
     }
 
-    const { otp, expiresAt } = generateEmailOtp()
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerifyOtp: otp,
-        emailVerifyOtpExpiresAt: expiresAt,
-        emailVerifyOtpAttempts: 0,
-      },
-    })
-
-    let emailSendFailed = false
-    try {
-      await sendEmailVerificationOtp({
-        email: user.email,
-        name: user.name,
-        otp,
-      })
-    } catch (err) {
-      console.error("Failed to send verification OTP", err)
-      emailSendFailed = true
-    }
-
-    if (emailSendFailed) {
-      return res.status(200).json({
-        message:
-          "Login successful but email verification failed. Please request a new OTP.",
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          roleDefault: user.roleDefault,
-          providerAvatarUrl: user.providerAvatarUrl,
-          emailVerified: user.emailVerified,
-        },
-      })
-    }
-
-    return res.status(200).json({
-      message: "Verification OTP sent.",
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        roleDefault: user.roleDefault,
-        providerAvatarUrl: user.providerAvatarUrl,
-        emailVerified: user.emailVerified,
-      },
-    })
+    const response = await buildAuthResponse(user)
+    return res.status(200).json(response)
   } catch (err) {
     console.error("POST /auth/login error", err)
     return res.status(500).json({ error: "Internal server error" })

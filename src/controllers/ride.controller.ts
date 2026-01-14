@@ -93,18 +93,50 @@ export async function createRide(req: AuthRequest, res: Response) {
  * GET /api/rides
  * Query params:
  *  - fromCity (optional)
+ *  - fromLat (optional)
+ *  - fromLng (optional)
  *  - toCity (optional)
+ *  - toLat (optional)
+ *  - toLng (optional)
+ *  - radiusKm (optional, defaults to 25)
  *  - date (optional, YYYY-MM-DD)
  *  - seats (optional, min seats required)
  */
 export async function searchRides(req: AuthRequest, res: Response) {
   try {
-    const { fromCity, toCity, date, seats } = req.query
+    const { fromCity, toCity, date, seats, fromLat, fromLng, toLat, toLng, radiusKm } =
+      req.query
 
     const minSeats = seats ? Number(seats) : 1
     if (seats && Number.isNaN(minSeats)) {
       return res.status(400).json({ error: "Invalid seats parameter" })
     }
+
+    const parsedFromLat = typeof fromLat === "string" ? Number(fromLat) : null
+    const parsedFromLng = typeof fromLng === "string" ? Number(fromLng) : null
+    const parsedToLat = typeof toLat === "string" ? Number(toLat) : null
+    const parsedToLng = typeof toLng === "string" ? Number(toLng) : null
+    const parsedRadiusKm =
+      typeof radiusKm === "string" ? Number(radiusKm) : 25
+
+    if (
+      (fromLat && Number.isNaN(parsedFromLat)) ||
+      (fromLng && Number.isNaN(parsedFromLng)) ||
+      (toLat && Number.isNaN(parsedToLat)) ||
+      (toLng && Number.isNaN(parsedToLng)) ||
+      (radiusKm && Number.isNaN(parsedRadiusKm))
+    ) {
+      return res.status(400).json({ error: "Invalid lat/lng or radiusKm parameter" })
+    }
+
+    if ((fromLat && !fromLng) || (!fromLat && fromLng)) {
+      return res.status(400).json({ error: "Both fromLat and fromLng are required" })
+    }
+
+    if ((toLat && !toLng) || (!toLat && toLng)) {
+      return res.status(400).json({ error: "Both toLat and toLng are required" })
+    }
+
     const filters: any = {
       status: "open",
       seatsAvailable: {
@@ -115,18 +147,65 @@ export async function searchRides(req: AuthRequest, res: Response) {
       },
     }
 
+    const hasFromCoords =
+      parsedFromLat != null &&
+      !Number.isNaN(parsedFromLat) &&
+      parsedFromLng != null &&
+      !Number.isNaN(parsedFromLng)
+    const hasToCoords =
+      parsedToLat != null &&
+      !Number.isNaN(parsedToLat) &&
+      parsedToLng != null &&
+      !Number.isNaN(parsedToLng)
+
+    const locationClauses: any[] = []
+
     if (fromCity && typeof fromCity === "string") {
-      filters.fromCity = {
-        contains: fromCity,
-        mode: "insensitive",
-      }
+      locationClauses.push({
+        fromCity: {
+          contains: fromCity,
+          mode: "insensitive",
+        },
+      })
     }
 
+    if (hasFromCoords) {
+      const bounds = buildBounds(parsedFromLat, parsedFromLng, parsedRadiusKm)
+      locationClauses.push({
+        fromLat: { gte: bounds.minLat, lte: bounds.maxLat },
+        fromLng: { gte: bounds.minLng, lte: bounds.maxLng },
+      })
+    }
+
+    if (locationClauses.length === 1) {
+      Object.assign(filters, locationClauses[0])
+    } else if (locationClauses.length > 1) {
+      filters.AND = [...(filters.AND ?? []), { OR: locationClauses }]
+    }
+
+    const toLocationClauses: any[] = []
+
     if (toCity && typeof toCity === "string") {
-      filters.toCity = {
-        contains: toCity,
-        mode: "insensitive",
-      }
+      toLocationClauses.push({
+        toCity: {
+          contains: toCity,
+          mode: "insensitive",
+        },
+      })
+    }
+
+    if (hasToCoords) {
+      const bounds = buildBounds(parsedToLat, parsedToLng, parsedRadiusKm)
+      toLocationClauses.push({
+        toLat: { gte: bounds.minLat, lte: bounds.maxLat },
+        toLng: { gte: bounds.minLng, lte: bounds.maxLng },
+      })
+    }
+
+    if (toLocationClauses.length === 1) {
+      Object.assign(filters, toLocationClauses[0])
+    } else if (toLocationClauses.length > 1) {
+      filters.AND = [...(filters.AND ?? []), { OR: toLocationClauses }]
     }
 
     // If date provided, override startTime filter for that day
@@ -142,7 +221,7 @@ export async function searchRides(req: AuthRequest, res: Response) {
       }
     }
 
-    const rides = await prisma.ride.findMany({
+    let rides = await prisma.ride.findMany({
       where: filters,
       orderBy: {
         startTime: "asc",
@@ -158,11 +237,72 @@ export async function searchRides(req: AuthRequest, res: Response) {
       },
     })
 
+    if (hasFromCoords) {
+      rides = rides.filter((ride) =>
+        isWithinRadius(
+          parsedFromLat,
+          parsedFromLng,
+          ride.fromLat,
+          ride.fromLng,
+          parsedRadiusKm
+        )
+      )
+    }
+
+    if (hasToCoords) {
+      rides = rides.filter((ride) =>
+        isWithinRadius(
+          parsedToLat,
+          parsedToLng,
+          ride.toLat,
+          ride.toLng,
+          parsedRadiusKm
+        )
+      )
+    }
+
     return res.json(rides)
   } catch (err) {
     console.error("GET /api/rides error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
+}
+
+function buildBounds(lat: number, lng: number, radiusKm: number) {
+  const latKm = 110.574
+  const lngKm = 111.320 * Math.cos((lat * Math.PI) / 180)
+  const deltaLat = radiusKm / latKm
+  const deltaLng = radiusKm / Math.max(lngKm, 0.0001)
+
+  return {
+    minLat: lat - deltaLat,
+    maxLat: lat + deltaLat,
+    minLng: lng - deltaLng,
+    maxLng: lng + deltaLng,
+  }
+}
+
+function isWithinRadius(
+  originLat: number,
+  originLng: number,
+  targetLat: number,
+  targetLng: number,
+  radiusKm: number
+) {
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const earthRadiusKm = 6371
+  const dLat = toRad(targetLat - originLat)
+  const dLng = toRad(targetLng - originLng)
+  const lat1 = toRad(originLat)
+  const lat2 = toRad(targetLat)
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  const distanceKm = earthRadiusKm * c
+
+  return distanceKm <= radiusKm
 }
 
 /**
@@ -273,13 +413,16 @@ export async function updateRide(req: AuthRequest, res: Response) {
     }
 
     if (updates.seatsTotal != null) {
-      updateData.seatsTotal = updates.seatsTotal;
+      updateData.seatsTotal = updates.seatsTotal
       // Adjust seatsAvailable proportionally
-      const delta = updates.seatsTotal - ride.seatsTotal;
-      let newSeatsAvailable = ride.seatsAvailable + delta;
+      const delta = updates.seatsTotal - ride.seatsTotal
+      let newSeatsAvailable = ride.seatsAvailable + delta
       // Clamp between 0 and updates.seatsTotal
-      newSeatsAvailable = Math.max(0, Math.min(newSeatsAvailable, updates.seatsTotal));
-      updateData.seatsAvailable = newSeatsAvailable;
+      newSeatsAvailable = Math.max(
+        0,
+        Math.min(newSeatsAvailable, updates.seatsTotal)
+      )
+      updateData.seatsAvailable = newSeatsAvailable
     }
 
     const updatedRide = await prisma.ride.update({
