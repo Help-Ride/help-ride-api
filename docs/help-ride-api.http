@@ -266,21 +266,21 @@ Accept: application/json
 
 ### DRIVER: GET BOOKINGS FOR A RIDE
 GET {{baseUrl}}/bookings/ride/{{rideId}}
-Authorization: Bearer {{driverAccessToken}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
 
 ### DRIVER: CONFIRM BOOKING
 PUT {{baseUrl}}/bookings/{{bookingId}}/confirm
-Authorization: Bearer {{driverAccessToken}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
 
 ### DRIVER: REJECT BOOKING
 PUT {{baseUrl}}/bookings/{{bookingId}}/reject
-Authorization: Bearer {{driverAccessToken}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
