@@ -6,6 +6,7 @@
 
 # Fill these from responses as you test
 @accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI4MzM4NiwiZXhwIjoxNzY1Mjg0Mjg2fQ.1bqLfkG3SCx3p4o5jA9VPtyNayYeY2VuB7RgtnTtyzA
+@refreshToken = 
 @driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
@@ -45,6 +46,26 @@ Content-Type: application/json
 {
   "email": "{{email}}",
   "password": "StrongPass123!"
+}
+
+###
+
+### REFRESH TOKENS
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+###
+
+### LOGOUT (REVOKE REFRESH TOKEN)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
 }
 
 ###

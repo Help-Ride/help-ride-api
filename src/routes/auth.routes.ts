@@ -7,6 +7,8 @@ import {
   getMe,
   sendEmailVerifyOtp,
   verifyEmailWithOtp,
+  refreshTokens,
+  logout,
 } from "../controllers/auth.controller.js"
 
 const router = Router()
@@ -15,6 +17,8 @@ router.post("/oauth", oauthLogin)
 
 router.post("/register", registerWithEmail)
 router.post("/login", loginWithEmail)
+router.post("/refresh", refreshTokens)
+router.post("/logout", logout)
 
 // Email verification (OTP)
 router.post("/verify-email/send-otp", sendEmailVerifyOtp)
