@@ -286,6 +286,7 @@ export async function sendMessage(req: AuthRequest, res: Response) {
     })
 
     if (pusherConfigured && pusher) {
+      const pusherClient = pusher
       const conversationChannel = `private-conversation-${conversationId}`
       const inboxPayload = {
         conversationId,
@@ -294,7 +295,7 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         lastMessage: message,
       }
 
-      await pusher.trigger(conversationChannel, "message:new", {
+      await pusherClient.trigger(conversationChannel, "message:new", {
         message,
       })
 
@@ -310,7 +311,7 @@ export async function sendMessage(req: AuthRequest, res: Response) {
 
       await Promise.all(
         inboxChannels.map((channel) =>
-          pusher.trigger(channel, "conversation:updated", inboxPayload)
+          pusherClient.trigger(channel, "conversation:updated", inboxPayload)
         )
       )
 
