@@ -6,9 +6,10 @@
 
 # Fill these from responses as you test
 @accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI4MzM4NiwiZXhwIjoxNzY1Mjg0Mjg2fQ.1bqLfkG3SCx3p4o5jA9VPtyNayYeY2VuB7RgtnTtyzA
-@refreshToken = 
+@refreshToken =
 @driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
+@bookingId =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @email = patel.rishi3001@gmail.com
 @otp = 332576
@@ -49,6 +50,9 @@ Content-Type: application/json
 }
 
 ###
+
+# Set from login/register/oauth response
+# @refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ### REFRESH TOKENS
 POST {{baseUrl}}/auth/refresh
@@ -250,6 +254,9 @@ Content-Type: application/json
 
 ###
 
+# Set from booking response
+# @bookingId = 00000000-0000-0000-0000-000000000000
+
 ### GET MY BOOKINGS (PASSENGER)
 GET {{baseUrl}}/bookings/me/list
 Authorization: Bearer {{accessToken}}
@@ -259,6 +266,20 @@ Accept: application/json
 
 ### DRIVER: GET BOOKINGS FOR A RIDE
 GET {{baseUrl}}/bookings/ride/{{rideId}}
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: CONFIRM BOOKING
+PUT {{baseUrl}}/bookings/{{bookingId}}/confirm
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: REJECT BOOKING
+PUT {{baseUrl}}/bookings/{{bookingId}}/reject
 Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
 
@@ -350,6 +371,19 @@ Accept: application/json
 ### GET SINGLE RIDE REQUEST (PUBLIC)
 GET {{baseUrl}}/ride-requests/{{rideRequestId}}
 Accept: application/json
+
+###
+
+### UPDATE OWN RIDE REQUEST
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "preferredTime": "09:30",
+  "arrivalTime": "12:00",
+  "seatsNeeded": 2
+}
 
 ###
 
