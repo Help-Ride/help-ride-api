@@ -280,14 +280,44 @@ export async function sendMessage(req: AuthRequest, res: Response) {
       }),
     ])
 
+    console.log("chat message saved", {
+      conversationId,
+      messageId: message.id,
+    })
+
     if (pusherConfigured && pusher) {
-      await pusher.trigger(
-        `private-conversation-${conversationId}`,
-        "message:new",
-        {
-          message,
-        }
+      const conversationChannel = `private-conversation-${conversationId}`
+      const inboxPayload = {
+        conversationId,
+        lastMessageAt: now,
+        lastMessagePreview: preview,
+        lastMessage: message,
+      }
+
+      await pusher.trigger(conversationChannel, "message:new", {
+        message,
+      })
+
+      console.log("pusher event sent", {
+        event: "message:new",
+        channel: conversationChannel,
+      })
+
+      const inboxChannels = [
+        `private-user-${participantCheck.conversation.passengerId}`,
+        `private-user-${participantCheck.conversation.driverId}`,
+      ]
+
+      await Promise.all(
+        inboxChannels.map((channel) =>
+          pusher.trigger(channel, "conversation:updated", inboxPayload)
+        )
       )
+
+      console.log("pusher event sent", {
+        event: "conversation:updated",
+        channels: inboxChannels,
+      })
     }
 
     return res.status(201).json(message)
@@ -317,15 +347,21 @@ export async function pusherAuth(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "socket_id and channel_name required" })
     }
 
-    const prefix = "private-conversation-"
-    if (!channel_name.startsWith(prefix)) {
+    const conversationPrefix = "private-conversation-"
+    const userPrefix = "private-user-"
+    if (channel_name.startsWith(conversationPrefix)) {
+      const conversationId = channel_name.slice(conversationPrefix.length)
+      const participantCheck = await ensureParticipant(conversationId, req.userId)
+      if (!participantCheck.ok) {
+        return res.status(403).json({ error: "Unauthorized" })
+      }
+    } else if (channel_name.startsWith(userPrefix)) {
+      const channelUserId = channel_name.slice(userPrefix.length)
+      if (channelUserId !== req.userId) {
+        return res.status(403).json({ error: "Unauthorized" })
+      }
+    } else {
       return res.status(400).json({ error: "Invalid channel name" })
-    }
-
-    const conversationId = channel_name.slice(prefix.length)
-    const participantCheck = await ensureParticipant(conversationId, req.userId)
-    if (!participantCheck.ok) {
-      return res.status(403).json({ error: "Unauthorized" })
     }
 
     const authResponse = pusher.authenticate(socket_id, channel_name)
