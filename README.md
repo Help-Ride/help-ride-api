@@ -306,7 +306,8 @@ Base URLs:
 ```
 
 - Creates a user with `emailVerified = false`.
-- Returns user and JWT tokens.
+- Sends a verification OTP to the email.
+- Call `POST /api/auth/verify-email/verify-otp` to receive tokens.
 
 ### Login
 
@@ -319,7 +320,8 @@ Base URLs:
 }
 ```
 
-- Returns access + refresh tokens for valid credentials.
+- Validates credentials and sends a verification OTP.
+- Call `POST /api/auth/verify-email/verify-otp` to receive tokens.
 
 ### Refresh Tokens
 
@@ -397,8 +399,9 @@ Base URLs:
    }
    ```
 
-   - Verifies the OTP.
-   - Marks `emailVerified = true` on the user.
+- Verifies the OTP.
+- Marks `emailVerified = true` on the user and returns access + refresh tokens.
+- Response includes `user` and `tokens`.
 
 ### Email Verification Enforcement (middleware)
 

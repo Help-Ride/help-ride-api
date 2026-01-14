@@ -1,11 +1,11 @@
 ################################################
 ### 🌐 ENVIRONMENT
 ################################################
-# @baseUrl = http://localhost:4000/api
-@baseUrl = https://dev-help-ride-api.vercel.app/api
+@baseUrl = http://localhost:4000/api
+# @baseUrl = https://dev-help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2ODM1ODQ0OSwiZXhwIjoxNzY4MzU5MzQ5fQ.7LVErwr_pYqTKy1P4N2ADcialNwab6nJQkSEGOQv1CI
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2ODM2NTE3NywiZXhwIjoxNzY4MzY2MDc3fQ.b2Lln5xs3MFe7kttBGRYTsWoYPX_y1FfQAte3R7BR_Y
 @driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
 @bookingId =
@@ -41,6 +41,7 @@ Content-Type: application/json
 
 ### LOGIN WITH EMAIL/PASSWORD
 # Use same email/password as above.
+# Note: login sends OTP; tokens are returned by verify-otp.
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
@@ -52,7 +53,7 @@ Content-Type: application/json
 ###
 
 # Set from login/register/oauth response
-# @refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+@refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ### REFRESH TOKENS
 POST {{baseUrl}}/auth/refresh
@@ -86,12 +87,13 @@ Content-Type: application/json
 
 ### VERIFY EMAIL WITH OTP
 # Replace {{otp}} with the 6-digit code from your email.
+# Tokens are returned on success.
 POST {{baseUrl}}/auth/verify-email/verify-otp
 Content-Type: application/json
 
 {
   "email": "{{email}}",
-  "otp": "{{otp}}"
+  "otp": "112991"
 }
 
 ###

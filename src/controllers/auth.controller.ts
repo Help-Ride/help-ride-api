@@ -93,6 +93,8 @@ function generateEmailOtp() {
  */
 export async function oauthLogin(req: AuthRequest, res: Response) {
   try {
+    console.log(req.body)
+
     const { provider, providerUserId, email, name, avatarUrl } = (req.body ??
       {}) as Partial<OAuthBody>
 
@@ -186,8 +188,54 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         },
       })
 
-      const response = await buildAuthResponse(updated)
-      return res.status(200).json(response)
+      const { otp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: updated.id },
+        data: {
+          emailVerifyOtp: otp,
+          emailVerifyOtpExpiresAt: expiresAt,
+          emailVerifyOtpAttempts: 0,
+        },
+      })
+
+      let emailSendFailed = false
+      try {
+        await sendEmailVerificationOtp({
+          email: updated.email,
+          name: updated.name,
+          otp,
+        })
+      } catch (err) {
+        console.error("Failed to send verification OTP", err)
+        emailSendFailed = true
+      }
+
+      if (emailSendFailed) {
+        return res.status(200).json({
+          message:
+            "Account updated but email verification failed. Please request a new OTP.",
+          user: {
+            id: updated.id,
+            name: updated.name,
+            email: updated.email,
+            roleDefault: updated.roleDefault,
+            providerAvatarUrl: updated.providerAvatarUrl,
+            emailVerified: updated.emailVerified,
+          },
+        })
+      }
+
+      return res.status(200).json({
+        message: "Verification OTP sent.",
+        user: {
+          id: updated.id,
+          name: updated.name,
+          email: updated.email,
+          roleDefault: updated.roleDefault,
+          providerAvatarUrl: updated.providerAvatarUrl,
+          emailVerified: updated.emailVerified,
+        },
+      })
     }
 
     if (existing && existing.passwordHash) {
@@ -199,8 +247,6 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
 
     const passwordHash = await bcrypt.hash(password, 10)
 
-    const { otp, expiresAt } = generateEmailOtp()
-
     const user = await prisma.user.create({
       data: {
         name,
@@ -208,34 +254,21 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         passwordHash,
         roleDefault: "passenger",
         emailVerified: false,
-        emailVerifyOtp: otp,
-        emailVerifyOtpExpiresAt: expiresAt,
-        emailVerifyOtpAttempts: 0,
       },
     })
 
     // Attempt to send verification OTP email, notify user if it fails
-    let emailSendFailed = false
-    try {
-      await sendEmailVerificationOtp({
-        email: user.email,
+    return res.status(201).json({
+      message: "Verification OTP sent.",
+      user: {
+        id: user.id,
         name: user.name,
-        otp,
-      })
-    } catch (err) {
-      console.error("Failed to send verification OTP", err)
-      emailSendFailed = true
-    }
-
-    const response = await buildAuthResponse(user)
-    if (emailSendFailed) {
-      return res.status(201).json({
-        ...response,
-        warning:
-          "Account created but email verification failed. Please request a new OTP.",
-      })
-    }
-    return res.status(201).json(response)
+        email: user.email,
+        roleDefault: user.roleDefault,
+        providerAvatarUrl: user.providerAvatarUrl,
+        emailVerified: user.emailVerified,
+      },
+    })
   } catch (err) {
     console.error("POST /auth/register error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -268,8 +301,54 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Invalid credentials" })
     }
 
-    const response = await buildAuthResponse(user)
-    return res.status(200).json(response)
+    const { otp, expiresAt } = generateEmailOtp()
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerifyOtp: otp,
+        emailVerifyOtpExpiresAt: expiresAt,
+        emailVerifyOtpAttempts: 0,
+      },
+    })
+
+    let emailSendFailed = false
+    try {
+      await sendEmailVerificationOtp({
+        email: user.email,
+        name: user.name,
+        otp,
+      })
+    } catch (err) {
+      console.error("Failed to send verification OTP", err)
+      emailSendFailed = true
+    }
+
+    if (emailSendFailed) {
+      return res.status(200).json({
+        message:
+          "Login successful but email verification failed. Please request a new OTP.",
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          roleDefault: user.roleDefault,
+          providerAvatarUrl: user.providerAvatarUrl,
+          emailVerified: user.emailVerified,
+        },
+      })
+    }
+
+    return res.status(200).json({
+      message: "Verification OTP sent.",
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        roleDefault: user.roleDefault,
+        providerAvatarUrl: user.providerAvatarUrl,
+        emailVerified: user.emailVerified,
+      },
+    })
   } catch (err) {
     console.error("POST /auth/login error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -441,12 +520,6 @@ export async function sendEmailVerifyOtp(req: AuthRequest, res: Response) {
       })
     }
 
-    if (user.emailVerified) {
-      return res.status(200).json({
-        message: "Email is already verified.",
-      })
-    }
-
     const { otp, expiresAt } = generateEmailOtp()
 
     const updated = await prisma.user.update({
@@ -491,13 +564,10 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
     const user = await prisma.user.findUnique({
       where: { email },
     })
+    console.log(email, otp, user)
 
     if (!user) {
       return res.status(400).json({ error: "Invalid email or OTP" })
-    }
-
-    if (user.emailVerified) {
-      return res.status(200).json({ message: "Email already verified." })
     }
 
     if (
@@ -505,7 +575,38 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       !user.emailVerifyOtpExpiresAt ||
       user.emailVerifyOtpExpiresAt < new Date()
     ) {
-      return res.status(400).json({ error: "OTP expired or not requested" })
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerifyOtp: newOtp,
+          emailVerifyOtpExpiresAt: expiresAt,
+          emailVerifyOtpAttempts: 0,
+        },
+      })
+
+      let emailSendFailed = false
+      try {
+        await sendEmailVerificationOtp({
+          email: user.email,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (err) {
+        console.error("Failed to resend verification OTP", err)
+        emailSendFailed = true
+      }
+
+      if (emailSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
     }
 
     // Optional: simple brute-force protection
@@ -532,15 +633,14 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       where: { id: user.id },
       data: {
         emailVerified: true,
-        emailVerifyOtp: null,
-        emailVerifyOtpExpiresAt: null,
         emailVerifyOtpAttempts: 0,
       },
     })
 
-    return res.status(200).json({
-      message: "Email verified successfully.",
-    })
+    const response = await buildAuthResponse(user)
+
+    console.log(response)
+    return res.status(200).json(response)
   } catch (err) {
     console.error("POST /auth/verify-email/verify-otp error", err)
     return res.status(500).json({ error: "Internal server error" })
