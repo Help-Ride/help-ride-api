@@ -12,6 +12,7 @@ It powers Flutter clients for passengers and drivers, using PostgreSQL (Neon) + 
 - **ORM:** Prisma
 - **Auth:** JWT (access + refresh), email/password, OAuth (Google / Apple-ready)
 - **Email:** Resend (for email verification OTP)
+- **Storage:** AWS S3 (driver documents)
 - **Deployment:** Vercel (Serverless API)
 - **Package Manager:** npm
 
@@ -29,21 +30,22 @@ help-ride-api/
 │  │  └─ jwt.ts           # JWT helpers
 │  ├─ middleware/
 │  │  ├─ auth.ts          # Auth guard (JWT)
-│  │  └─ emailVerified.ts # Enforce email verification for protected actions
+│  │  └─ requireVerifiedEmail.ts # Enforce email verification for protected actions
 │  ├─ controllers/
 │  │  ├─ auth.controller.ts
 │  │  ├─ ride.controller.ts
 │  │  ├─ booking.controller.ts
-│  │  ├─ driverProfile.controller.ts
+│  │  ├─ driver.controller.ts
+│  │  ├─ driverDocument.controller.ts
 │  │  ├─ rideRequest.controller.ts
 │  │  └─ user.controller.ts
 │  ├─ routes/
 │  │  ├─ auth.routes.ts
-│  │  ├─ rides.routes.ts
-│  │  ├─ bookings.routes.ts
-│  │  ├─ drivers.routes.ts
-│  │  ├─ rideRequests.routes.ts
-│  │  └─ users.routes.ts
+│  │  ├─ ride.routes.ts
+│  │  ├─ booking.routes.ts
+│  │  ├─ driver.routes.ts
+│  │  ├─ rideRequest.routes.ts
+│  │  └─ user.routes.ts
 │  └─ types/              # Shared types (if any)
 ├─ prisma/
 │  ├─ schema.prisma       # Prisma schema
@@ -75,6 +77,12 @@ JWT_REFRESH_SECRET="your-strong-refresh-secret"
 # Email (Resend)
 RESEND_API_KEY="re_xxx"
 EMAIL_FROM="HelpRide <noreply@exocodelabs.tech>"
+
+# AWS S3 (Driver documents)
+AWS_S3_BUCKET="your-bucket-name"
+AWS_REGION="us-east-1"
+AWS_ACCESS_KEY_ID="AKIA..."
+AWS_SECRET_ACCESS_KEY="..."
 
 # App
 NODE_ENV="development"        # or "production"
@@ -110,7 +118,9 @@ enum RideStatus {
 enum BookingStatus {
   pending
   confirmed
-  cancelled
+  cancelled_by_passenger
+  cancelled_by_driver
+  completed
 }
 
 enum PaymentStatus {
@@ -124,6 +134,26 @@ enum NotificationType {
   payment
   system
 }
+
+enum DriverDocumentType {
+  license
+  insurance
+  ownership
+  other
+}
+
+enum DriverDocumentStatus {
+  pending
+  approved
+  rejected
+}
+
+enum RideRequestStatus {
+  pending
+  matched
+  cancelled
+  expired
+}
 ```
 
 **Core models (high level)**
@@ -133,7 +163,7 @@ enum NotificationType {
   - `roleDefault` (`passenger` / `driver`)  
   - `providerAvatarUrl?`  
   - `emailVerified` (bool)  
-  - Relations: `oauthAccounts`, `driverProfile?`, `rides` (as driver), `bookings` (as passenger), `notifications`, `sosEvents`
+  - Relations: `oauthAccounts`, `driverProfile?`, `rides` (as driver), `bookings` (as passenger), `notifications`, `sosEvents`, `rideRequests`, `driverDocuments`, `refreshTokens`
 
 - `OAuthAccount`  
   - Providers (Google / Apple), `providerUserId`, `providerEmail`, tokens
@@ -165,12 +195,18 @@ enum NotificationType {
 - `SosEvent`  
   - `userId`, optional `rideId`, `lat`, `lng`
 
-- `RideRequest` (**in code, model should exist**)  
+- `RideRequest`  
   - `passengerId`, origin/destination (city + lat/lng)  
   - `preferredDate`, `preferredTime?`, `arrivalTime?` (string)  
   - `seatsNeeded`, `rideType` (`one-time` / `recurring`), `tripType` (`one-way` / `round-trip`)  
   - optional `returnDate`, `returnTime`  
   - `status`: `pending | matched | cancelled | expired`
+
+- `DriverDocument`  
+  - `userId`, `type`, `s3Key`, `fileName`, `mimeType`, `status`
+
+- `RefreshToken`  
+  - `userId`, `tokenHash`, `expiresAt`, `revokedAt?`, `replacedByTokenId?`
 
 > **Note**: The Prisma schema in `prisma/schema.prisma` is the source of truth. This section is an overview for devs.
 
@@ -220,9 +256,10 @@ There are two dev-friendly docs in `docs/`:
 
 Both are kept in sync with the implementation and include working examples for all major flows:
 
-- Auth (email + OAuth)
+- Auth (email + OAuth, refresh, logout)
 - Email verification (OTP)
 - Driver profiles
+- Driver documents (S3 presign)
 - Rides (with `arrivalTime`)
 - Ride requests
 - Bookings (including driver confirm/reject)
@@ -231,7 +268,8 @@ Both are kept in sync with the implementation and include working examples for a
 Base URLs:
 
 - Local: `http://localhost:4000/api`
-- Production (Vercel): `https://help-ride-api.vercel.app/api` (or feature-branch aliases)
+- Dev (Vercel): `https://dev-help-ride-api.vercel.app/api`
+- Production (Vercel): `https://help-ride-api.vercel.app/api`
 
 ---
 
@@ -265,6 +303,31 @@ Base URLs:
 
 - Returns access + refresh tokens for valid credentials.
 
+### Refresh Tokens
+
+`POST /api/auth/refresh`
+
+```json
+{
+  "refreshToken": "your-refresh-token"
+}
+```
+
+- Validates the refresh token, rotates it, and returns new access + refresh tokens.
+- Refresh tokens are stored hashed in the database for revocation and rotation.
+
+### Logout (Revoke Refresh Token)
+
+`POST /api/auth/logout`
+
+```json
+{
+  "refreshToken": "your-refresh-token"
+}
+```
+
+- Revokes the current refresh token so it can’t be used again.
+
 ### OAuth Login
 
 `POST /api/auth/oauth`
@@ -294,7 +357,7 @@ Base URLs:
 
 1. **Send OTP**
 
-   `POST /api/auth/verify-email/send-otp` (JWT required)
+   `POST /api/auth/verify-email/send-otp`
 
    ```json
    {
@@ -303,16 +366,16 @@ Base URLs:
    ```
 
    - Sends a one-time code to the user’s email via Resend.
-   - Stores hashed code + expiry against the user (implementation detail).
+   - Stores the OTP + expiry against the user.
 
 2. **Verify OTP**
 
-   `POST /api/auth/verify-email/verify-otp` (JWT required)
+   `POST /api/auth/verify-email/verify-otp`
 
    ```json
    {
      "email": "emailuser@example.com",
-     "code": "123456"
+     "otp": "123456"
    }
    ```
 
@@ -331,7 +394,7 @@ Protected actions require `emailVerified = true`:
 Middleware (conceptually):
 
 ```ts
-// emailVerified.ts
+// requireVerifiedEmail.ts
 if (!req.userId) 401
 const user = await prisma.user.findUnique(...)
 if (!user?.emailVerified) {
@@ -390,11 +453,35 @@ Single-car model for now (one `DriverProfile` per `User`).
 
 ---
 
+## Driver Documents (S3)
+
+### Get Upload URL (Presign)
+
+`POST /api/drivers/:id/documents/presign` (JWT – must match current user)
+
+```json
+{
+  "type": "license",
+  "fileName": "license.jpg",
+  "mimeType": "image/jpeg"
+}
+```
+
+- Returns a presigned S3 upload URL and creates a `DriverDocument` row with `pending` status.
+
+### List My Documents
+
+`GET /api/drivers/:id/documents` (JWT – must match current user)
+
+- Returns documents with presigned download URLs.
+
+---
+
 ## Rides Module
 
 ### Create Ride
 
-`POST /api/rides` (JWT driver, emailVerified)
+`POST /api/rides` (JWT + emailVerified)
 
 ```json
 {
@@ -422,7 +509,7 @@ Single-car model for now (one `DriverProfile` per `User`).
 - Public endpoint – unauthenticated users can browse.
 - Filters by city names and minimum seats.
 
-### Get My Rides (Driver)
+### Get My Rides
 
 `GET /api/rides/me/list` (JWT)
 
@@ -434,9 +521,9 @@ Single-car model for now (one `DriverProfile` per `User`).
 
 - Public read of a single ride.
 
-### Update Ride (Driver)
+### Update Ride
 
-`PUT /api/rides/:id` (JWT – must be the driver)
+`PUT /api/rides/:id` (JWT – must be the driver for the ride)
 
 ```json
 {
@@ -449,7 +536,7 @@ Single-car model for now (one `DriverProfile` per `User`).
 - Validates times and allows updating `arrivalTime` (or clearing it by sending `null` / empty string).
 - Leaves `seatsAvailable` unchanged for now (can be improved later).
 
-### Delete Ride (Driver)
+### Delete Ride
 
 `DELETE /api/rides/:id` (JWT – must be driver)
 
@@ -505,6 +592,20 @@ Used when no matching ride exists and passengers want to post what they need.
 
 - Public read of a single ride request.
 
+### Update Ride Request (Passenger)
+
+`PUT /api/ride-requests/:id` (JWT – must be owner)
+
+```json
+{
+  "preferredTime": "09:30",
+  "arrivalTime": "12:00",
+  "seatsNeeded": 2
+}
+```
+
+- Partial update of the request fields.
+
 ### Cancel Ride Request
 
 `DELETE /api/ride-requests/:id` (JWT – must be owner)
@@ -556,7 +657,7 @@ Passenger booking → driver approval → seats updated.
 
 `PUT /api/bookings/:id/reject` (JWT driver)
 
-- Marks `status = "cancelled"` (or similar) for that booking.
+- Marks `status = "cancelled_by_driver"` for that booking.
 - Does **not** decrement seats.
 
 _Payment integration (Stripe) is planned but not implemented yet – booking/payment linkage is already modeled in `Booking` and `Payment`._
