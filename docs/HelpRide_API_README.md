@@ -93,6 +93,20 @@ Authorization: Bearer <accessToken>
 
 ## 🚗 Rides
 
+### Pricing Rules (Ontario)
+
+The API resolves the final per-seat price on create/update using these rules:
+
+1. Fixed route price (if configured)
+2. ONTIME uplift (+30%) if booking is within 2 hours of departure
+3. Minimum price protection (distance ≥ 55 km, seats ≤ 2, price < $20 → $20)
+4. Same-drop ceiling (distance ≥ 50 km → price ≤ $15)
+5. Upper safety cap (price ≤ distance × $0.30)
+
+`pricePerSeat` in requests is treated as the base/desired value before rules apply.
+
+---
+
 ### Create Ride (Driver)
 
 `POST /rides`
@@ -214,6 +228,48 @@ Authorization: Bearer <accessToken>
   "tripType": "one-way"
 }
 ```
+
+---
+
+## 💵 Fixed Route Pricing
+
+### Create Fixed Route Price
+
+`POST /fixed-route-prices`
+
+```json
+{
+  "fromCity": "Brampton",
+  "toCity": "Whitby",
+  "pricePerSeat": 12,
+  "isActive": true
+}
+```
+
+---
+
+### List Fixed Route Prices
+
+`GET /fixed-route-prices`
+
+---
+
+### Update Fixed Route Price
+
+`PUT /fixed-route-prices/{id}`
+
+```json
+{
+  "pricePerSeat": 15,
+  "isActive": true
+}
+```
+
+---
+
+### Delete Fixed Route Price
+
+`DELETE /fixed-route-prices/{id}`
 
 ---
 
