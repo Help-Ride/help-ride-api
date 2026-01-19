@@ -13,6 +13,7 @@
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @email = patel.rishi3001@gmail.com
 @otp = 332576
+@resetOtp = 112233
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -94,6 +95,29 @@ Content-Type: application/json
 {
   "email": "{{email}}",
   "otp": "112991"
+}
+
+###
+
+### SEND PASSWORD RESET OTP
+POST {{baseUrl}}/auth/password-reset/send-otp
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+###
+
+### RESET PASSWORD WITH OTP
+# Replace {{resetOtp}} with the 6-digit code from your email.
+POST {{baseUrl}}/auth/password-reset/verify-otp
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "otp": "{{resetOtp}}",
+  "newPassword": "NewStrongPass123!"
 }
 
 ###

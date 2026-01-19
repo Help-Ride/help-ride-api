@@ -32,3 +32,26 @@ export async function sendEmailVerificationOtp(params: {
     html,
   })
 }
+
+export async function sendPasswordResetOtp(params: {
+  email: string
+  name: string
+  otp: string
+}) {
+  const { email, name, otp } = params
+
+  const html = `
+    <p>Hi ${name || "there"},</p>
+    <p>Your ${APP_NAME} password reset code is:</p>
+    <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${otp}</p>
+    <p>This code will expire in 10 minutes.</p>
+    <p>If you didn’t request a password reset, you can ignore this email.</p>
+  `
+
+  await resend.emails.send({
+    from: EMAIL_FROM,
+    to: email,
+    subject: `Your ${APP_NAME} password reset code`,
+    html,
+  })
+}

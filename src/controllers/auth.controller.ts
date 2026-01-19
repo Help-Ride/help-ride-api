@@ -9,7 +9,7 @@ import {
   verifyRefreshToken,
 } from "../lib/jwt.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { sendEmailVerificationOtp } from "../lib/email.js"
+import { sendEmailVerificationOtp, sendPasswordResetOtp } from "../lib/email.js"
 
 interface OAuthBody {
   provider: "google" | "apple"
@@ -32,6 +32,12 @@ interface LoginBody {
 
 interface RefreshBody {
   refreshToken: string
+}
+
+interface ResetPasswordBody {
+  email: string
+  otp: string
+  newPassword: string
 }
 
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -541,6 +547,161 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
     return res.status(200).json(response)
   } catch (err) {
     console.error("POST /auth/verify-email/verify-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/send-otp
+ * Body: { email }
+ */
+export async function sendPasswordResetOtpEmail(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    const { email } = (req.body ?? {}) as { email?: string }
+
+    if (!email) {
+      return res.status(400).json({ error: "email is required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (!user) {
+      return res.status(200).json({
+        message: "If an account exists for this email, an OTP has been sent.",
+      })
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetOtp: otp,
+        passwordResetOtpExpiresAt: expiresAt,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    await sendPasswordResetOtp({
+      email: updated.email,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Password reset OTP sent.",
+    })
+  } catch (err) {
+    console.error("POST /auth/password-reset/send-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/verify-otp
+ * Body: { email, otp, newPassword }
+ */
+export async function resetPasswordWithOtp(req: AuthRequest, res: Response) {
+  try {
+    const { email, otp, newPassword } = (req.body ?? {}) as Partial<
+      ResetPasswordBody
+    >
+
+    if (!email || !otp || !newPassword) {
+      return res
+        .status(400)
+        .json({ error: "email, otp, and newPassword are required" })
+    }
+
+    if (newPassword.length < 8) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 8 characters long" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid email or OTP" })
+    }
+
+    if (
+      !user.passwordResetOtp ||
+      !user.passwordResetOtpExpiresAt ||
+      user.passwordResetOtpExpiresAt < new Date()
+    ) {
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtp: newOtp,
+          passwordResetOtpExpiresAt: expiresAt,
+          passwordResetOtpAttempts: 0,
+        },
+      })
+
+      let emailSendFailed = false
+      try {
+        await sendPasswordResetOtp({
+          email: user.email,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (err) {
+        console.error("Failed to resend password reset OTP", err)
+        emailSendFailed = true
+      }
+
+      if (emailSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
+    }
+
+    if (user.passwordResetOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
+    if (user.passwordResetOtp !== otp) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtpAttempts: { increment: 1 },
+        },
+      })
+
+      return res.status(400).json({ error: "Invalid email or OTP" })
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordResetOtp: null,
+        passwordResetOtpExpiresAt: null,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    return res.status(200).json({ message: "Password reset successful." })
+  } catch (err) {
+    console.error("POST /auth/password-reset/verify-otp error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
