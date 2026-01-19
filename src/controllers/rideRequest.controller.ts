@@ -3,6 +3,7 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { Prisma } from "../generated/prisma/client.js"
+import { resolveSeatPrice } from "../lib/pricing.js"
 
 interface CreateRideBody {
   fromCity?: string
@@ -140,6 +141,18 @@ export async function createRide(req: AuthRequest, res: Response) {
       arrivalTimeDate = d
     }
 
+    const pricing = await resolveSeatPrice({
+      fromCity,
+      toCity,
+      fromLat,
+      fromLng,
+      toLat,
+      toLng,
+      seats: seatsTotal,
+      basePricePerSeat: pricePerSeat,
+      departureTime: startTimeDate,
+    })
+
     const ride = await prisma.ride.create({
       data: {
         driverId: req.userId,
@@ -151,7 +164,7 @@ export async function createRide(req: AuthRequest, res: Response) {
         toLng,
         startTime: startTimeDate,
         arrivalTime: arrivalTimeDate,
-        pricePerSeat: new Prisma.Decimal(pricePerSeat),
+        pricePerSeat: new Prisma.Decimal(pricing.pricePerSeat),
         seatsTotal,
         seatsAvailable: seatsTotal,
         status: "open",
@@ -215,6 +228,21 @@ export async function updateRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: arrivalTimeResult.error })
     }
 
+    const pricing =
+      pricePerSeat !== undefined
+        ? await resolveSeatPrice({
+            fromCity: fromCity ?? ride.fromCity,
+            toCity: toCity ?? ride.toCity,
+            fromLat: fromLat ?? ride.fromLat,
+            fromLng: fromLng ?? ride.fromLng,
+            toLat: toLat ?? ride.toLat,
+            toLng: toLng ?? ride.toLng,
+            seats: seatsTotal ?? ride.seatsTotal,
+            basePricePerSeat: pricePerSeat,
+            departureTime: startTimeResult.date ?? ride.startTime,
+          })
+        : null
+
     const updated = await prisma.ride.update({
       where: { id },
       data: {
@@ -230,9 +258,7 @@ export async function updateRide(req: AuthRequest, res: Response) {
             ? arrivalTimeResult.date
             : ride.arrivalTime,
         pricePerSeat:
-          pricePerSeat !== undefined
-            ? new Prisma.Decimal(pricePerSeat)
-            : ride.pricePerSeat,
+          pricing ? new Prisma.Decimal(pricing.pricePerSeat) : ride.pricePerSeat,
         seatsTotal: seatsTotal ?? ride.seatsTotal,
         // You can refine this later if you want smarter seat logic
         seatsAvailable: ride.seatsAvailable,

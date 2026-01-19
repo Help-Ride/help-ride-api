@@ -521,3 +521,48 @@ Content-Type: application/json
 GET {{baseUrl}}/drivers/{{userId}}/documents
 Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+###
+
+################################################
+### 💵 FIXED ROUTE PRICING (ADMIN/MANAGEMENT)
+################################################
+
+### CREATE FIXED ROUTE PRICE
+POST {{baseUrl}}/fixed-route-prices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Brampton",
+  "toCity": "Whitby",
+  "pricePerSeat": 12,
+  "isActive": true
+}
+
+###
+
+### LIST FIXED ROUTE PRICES
+GET {{baseUrl}}/fixed-route-prices
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+@fixedRoutePriceId = 00000000-0000-0000-0000-000000000000
+
+### UPDATE FIXED ROUTE PRICE
+PUT {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "pricePerSeat": 15,
+  "isActive": true
+}
+
+###
+
+### DELETE FIXED ROUTE PRICE
+DELETE {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
+Authorization: Bearer {{accessToken}}

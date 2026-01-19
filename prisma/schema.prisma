@@ -181,6 +181,19 @@ model Ride {
   conversations   Conversation[]
 }
 
+model FixedRoutePrice {
+  id           String   @id @default(uuid())
+  fromCity     String
+  toCity       String
+  pricePerSeat Decimal  @db.Decimal(10, 2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([fromCity])
+  @@index([toCity])
+}
+
 model Booking {
   id                    String         @id @default(uuid())
   ride                  Ride           @relation(fields: [rideId], references: [id])

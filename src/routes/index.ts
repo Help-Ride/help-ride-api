@@ -7,6 +7,7 @@ import driverRoutes from "./driver.routes.js"
 import rideRequestRoutes from "./rideRequest.routes.js"
 import userRoutes from "./user.routes.js"
 import chatRoutes from "./chat.routes.js"
+import fixedRoutePriceRoutes from "./fixedRoutePrice.routes.js"
 
 export function registerRoutes(app: Express) {
   app.use("/api/auth", authRoutes)
@@ -14,6 +15,7 @@ export function registerRoutes(app: Express) {
   app.use("/api/bookings", bookingRoutes)
   app.use("/api/drivers", driverRoutes)
   app.use("/api/ride-requests", rideRequestRoutes)
+  app.use("/api/fixed-route-prices", fixedRoutePriceRoutes)
   app.use("/api/users", userRoutes)
   app.use("/api/chat", chatRoutes)
 }

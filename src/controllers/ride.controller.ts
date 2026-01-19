@@ -2,6 +2,7 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { resolveSeatPrice } from "../lib/pricing.js"
 
 interface CreateRideBody {
   fromCity: string
@@ -65,6 +66,18 @@ export async function createRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid startTime" })
     }
 
+    const pricing = await resolveSeatPrice({
+      fromCity,
+      toCity,
+      fromLat,
+      fromLng,
+      toLat,
+      toLng,
+      seats: seatsTotal,
+      basePricePerSeat: pricePerSeat,
+      departureTime: start,
+    })
+
     const ride = await prisma.ride.create({
       data: {
         driverId: req.userId,
@@ -75,7 +88,7 @@ export async function createRide(req: AuthRequest, res: Response) {
         toLat,
         toLng,
         startTime: start,
-        pricePerSeat,
+        pricePerSeat: pricing.pricePerSeat,
         seatsTotal,
         seatsAvailable: seatsTotal,
         status: "open",
@@ -423,6 +436,23 @@ export async function updateRide(req: AuthRequest, res: Response) {
         Math.min(newSeatsAvailable, updates.seatsTotal)
       )
       updateData.seatsAvailable = newSeatsAvailable
+    }
+
+    if (updates.pricePerSeat != null) {
+      const pricing = await resolveSeatPrice({
+        fromCity: updates.fromCity ?? ride.fromCity,
+        toCity: updates.toCity ?? ride.toCity,
+        fromLat: updates.fromLat ?? ride.fromLat,
+        fromLng: updates.fromLng ?? ride.fromLng,
+        toLat: updates.toLat ?? ride.toLat,
+        toLng: updates.toLng ?? ride.toLng,
+        seats: updates.seatsTotal ?? ride.seatsTotal,
+        basePricePerSeat: updates.pricePerSeat,
+        departureTime: updates.startTime
+          ? new Date(updates.startTime)
+          : ride.startTime,
+      })
+      updateData.pricePerSeat = pricing.pricePerSeat
     }
 
     const updatedRide = await prisma.ride.update({
