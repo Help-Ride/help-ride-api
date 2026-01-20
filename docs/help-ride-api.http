@@ -486,6 +486,58 @@ Authorization: Bearer {{accessToken}}
 
 ###
 
+################################################
+### 🧾 RIDE REQUEST OFFERS (DRIVER ↔ PASSENGER)
+################################################
+
+### DRIVER: CREATE OFFER FOR REQUEST
+POST {{baseUrl}}/ride-requests/{{rideRequestId}}/offers
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}",
+  "seatsOffered": 1
+}
+
+###
+
+### PASSENGER: LIST OFFERS FOR A REQUEST
+GET {{baseUrl}}/ride-requests/{{rideRequestId}}/offers
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: LIST MY OFFERS
+GET {{baseUrl}}/ride-requests/offers/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+@offerId = 00000000-0000-0000-0000-000000000000
+
+### PASSENGER: ACCEPT OFFER (CONFIRMS RIDE)
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}/offers/{{offerId}}/accept
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### PASSENGER: REJECT OFFER
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}/offers/{{offerId}}/reject
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: CANCEL OFFER
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}/offers/{{offerId}}/cancel
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
 
 ################################################
 ### 👤 USER PROFILE UPDATE

@@ -214,6 +214,8 @@ The API resolves the final per-seat price on create/update using these rules:
 
 ## 📌 Ride Requests
 
+Passengers create ride requests; drivers can browse pending requests and offer rides.
+
 ### Create Ride Request
 
 `POST /ride-requests`
@@ -288,6 +290,51 @@ The API resolves the final per-seat price on create/update using these rules:
 ### Delete Ride Request
 
 `DELETE /ride-requests/{rideRequestId}`
+
+---
+
+### Create Ride Request Offer (Driver)
+
+`POST /ride-requests/{rideRequestId}/offers`
+
+```json
+{
+  "rideId": "ride-id",
+  "seatsOffered": 1
+}
+```
+
+---
+
+### List Ride Request Offers (Passenger/Driver)
+
+`GET /ride-requests/{rideRequestId}/offers`
+
+---
+
+### My Ride Request Offers (Driver)
+
+`GET /ride-requests/offers/me/list`
+
+---
+
+### Accept Offer (Passenger)
+
+`PUT /ride-requests/{rideRequestId}/offers/{offerId}/accept`
+
+Accepting an offer confirms the ride and creates a confirmed booking.
+
+---
+
+### Reject Offer (Passenger)
+
+`PUT /ride-requests/{rideRequestId}/offers/{offerId}/reject`
+
+---
+
+### Cancel Offer (Driver)
+
+`PUT /ride-requests/{rideRequestId}/offers/{offerId}/cancel`
 
 ---
 
