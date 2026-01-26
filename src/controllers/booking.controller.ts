@@ -75,13 +75,30 @@ export async function createBooking(req: AuthRequest, res: Response) {
         status: "pending",
       },
       include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
         ride: {
           select: {
             id: true,
             fromCity: true,
             toCity: true,
             startTime: true,
-            driverId: true,
+            pricePerSeat: true,
+            status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
           },
         },
       },
@@ -120,6 +137,14 @@ export async function getMyBookings(req: AuthRequest, res: Response) {
       where: { passengerId: req.userId },
       orderBy: { createdAt: "desc" },
       include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
         ride: {
           select: {
             id: true,
@@ -127,7 +152,15 @@ export async function getMyBookings(req: AuthRequest, res: Response) {
             toCity: true,
             startTime: true,
             pricePerSeat: true,
-            driverId: true,
+            status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
           },
         },
       },
@@ -183,6 +216,24 @@ export async function getBookingsForRide(req: AuthRequest, res: Response) {
             name: true,
             email: true,
             providerAvatarUrl: true,
+          },
+        },
+        ride: {
+          select: {
+            id: true,
+            fromCity: true,
+            toCity: true,
+            startTime: true,
+            pricePerSeat: true,
+            status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
           },
         },
       },
@@ -252,6 +303,7 @@ export async function getDriverBookingsInbox(req: AuthRequest, res: Response) {
             name: true,
             email: true,
             phone: true,
+            providerAvatarUrl: true,
           },
         },
         ride: {
@@ -262,6 +314,14 @@ export async function getDriverBookingsInbox(req: AuthRequest, res: Response) {
             startTime: true,
             pricePerSeat: true,
             status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
           },
         },
       },
@@ -347,8 +407,40 @@ export async function cancelBookingByPassenger(req: AuthRequest, res: Response) 
       },
     })
 
+    const bookingWithRelations = await prisma.booking.findUnique({
+      where: { id: updatedBooking.id },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+        ride: {
+          select: {
+            id: true,
+            fromCity: true,
+            toCity: true,
+            startTime: true,
+            pricePerSeat: true,
+            status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
     return res.json({
-      booking: updatedBooking,
+      booking: bookingWithRelations ?? updatedBooking,
       ride: updatedRide,
     })
   } catch (err) {
@@ -427,8 +519,40 @@ export async function cancelBookingByDriver(req: AuthRequest, res: Response) {
       },
     })
 
+    const bookingWithRelations = await prisma.booking.findUnique({
+      where: { id: updatedBooking.id },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+        ride: {
+          select: {
+            id: true,
+            fromCity: true,
+            toCity: true,
+            startTime: true,
+            pricePerSeat: true,
+            status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
     return res.json({
-      booking: updatedBooking,
+      booking: bookingWithRelations ?? updatedBooking,
       ride: updatedRide,
     })
   } catch (err) {
@@ -516,8 +640,40 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
       },
     })
 
+    const bookingWithRelations = await prisma.booking.findUnique({
+      where: { id: updatedBooking.id },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+        ride: {
+          select: {
+            id: true,
+            fromCity: true,
+            toCity: true,
+            startTime: true,
+            pricePerSeat: true,
+            status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
     return res.json({
-      booking: updatedBooking,
+      booking: bookingWithRelations ?? updatedBooking,
       ride: updatedRide,
     })
   } catch (err) {
@@ -581,7 +737,39 @@ export async function rejectBooking(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.json(updated)
+    const bookingWithRelations = await prisma.booking.findUnique({
+      where: { id: updated.id },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+        ride: {
+          select: {
+            id: true,
+            fromCity: true,
+            toCity: true,
+            startTime: true,
+            pricePerSeat: true,
+            status: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    return res.json(bookingWithRelations ?? updated)
   } catch (err) {
     console.error("PUT /bookings/:id/reject error", err)
     return res.status(500).json({ error: "Internal server error" })

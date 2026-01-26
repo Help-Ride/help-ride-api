@@ -141,6 +141,16 @@ export async function createRide(req: AuthRequest, res: Response) {
         returnDate: returnDateValue,
         returnTime: returnTime ?? null,
       },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+      },
     })
 
     return res.status(201).json(request)
@@ -236,6 +246,16 @@ export async function updateRide(req: AuthRequest, res: Response) {
         tripType: tripType ?? request.tripType,
         returnDate: returnDateValue ?? request.returnDate,
         returnTime: returnTime !== undefined ? returnTime : request.returnTime,
+      },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
       },
     })
 
@@ -375,6 +395,7 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
+            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -462,6 +483,16 @@ export async function getMyRideRequests(req: AuthRequest, res: Response) {
     const requests = await prisma.rideRequest.findMany({
       where: { passengerId: req.userId },
       orderBy: { createdAt: "desc" },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+      },
     })
 
     return res.json(requests)
@@ -489,6 +520,7 @@ export async function getRideRequestById(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
+            email: true,
             providerAvatarUrl: true,
           },
         },

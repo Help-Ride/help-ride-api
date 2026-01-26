@@ -156,6 +156,7 @@ export async function listRideRequestOffers(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
+            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -190,6 +191,14 @@ export async function listMyRideRequestOffers(req: AuthRequest, res: Response) {
             toCity: true,
             preferredDate: true,
             seatsNeeded: true,
+            passenger: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
           },
         },
       },
@@ -273,6 +282,34 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
           passengerId: offer.rideRequest.passengerId,
           seatsBooked: offer.seatsOffered,
           status: "confirmed",
+        },
+        include: {
+          passenger: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              providerAvatarUrl: true,
+            },
+          },
+          ride: {
+            select: {
+              id: true,
+              fromCity: true,
+              toCity: true,
+              startTime: true,
+              pricePerSeat: true,
+              status: true,
+              driver: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  providerAvatarUrl: true,
+                },
+              },
+            },
+          },
         },
       }),
       prisma.ride.update({
