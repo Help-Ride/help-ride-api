@@ -3,6 +3,7 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { pusher, pusherConfigured } from "../lib/pusher.js"
+import { notifyUser } from "../lib/notifications.js"
 
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
@@ -279,6 +280,23 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         },
       }),
     ])
+
+    const recipientId =
+      participantCheck.conversation.passengerId === req.userId
+        ? participantCheck.conversation.driverId
+        : participantCheck.conversation.passengerId
+
+    await notifyUser({
+      userId: recipientId,
+      title: "New message",
+      body: `You have a new message from ${message.sender.name}`,
+      type: "system",
+      data: {
+        conversationId,
+        messageId: message.id,
+        kind: "chat_message",
+      },
+    })
 
     console.log("chat message saved", {
       conversationId,

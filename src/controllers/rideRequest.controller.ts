@@ -2,6 +2,7 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { notifyUsersByRole } from "../lib/notifications.js"
 
 interface CreateRideRequestBody {
   fromCity?: string
@@ -150,6 +151,18 @@ export async function createRide(req: AuthRequest, res: Response) {
             providerAvatarUrl: true,
           },
         },
+      },
+    })
+
+    await notifyUsersByRole({
+      role: "driver",
+      excludeUserId: req.userId,
+      title: "New ride request",
+      body: `${request.fromCity} → ${request.toCity} request posted`,
+      type: "ride_update",
+      data: {
+        rideRequestId: request.id,
+        kind: "ride_request_created",
       },
     })
 

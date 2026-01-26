@@ -3,7 +3,7 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { resolveSeatPrice } from "../lib/pricing.js"
-import { notifyUser } from "../lib/notifications.js"
+import { notifyUser, notifyUsersByRole } from "../lib/notifications.js"
 
 interface CreateRideBody {
   fromCity: string
@@ -93,6 +93,18 @@ export async function createRide(req: AuthRequest, res: Response) {
         seatsTotal,
         seatsAvailable: seatsTotal,
         status: "open",
+      },
+    })
+
+    await notifyUsersByRole({
+      role: "passenger",
+      excludeUserId: req.userId,
+      title: "New ride available",
+      body: `${ride.fromCity} → ${ride.toCity} is now available`,
+      type: "ride_update",
+      data: {
+        rideId: ride.id,
+        kind: "ride_created",
       },
     })
 

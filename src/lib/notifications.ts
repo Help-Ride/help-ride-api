@@ -9,6 +9,15 @@ type NotificationPayload = {
   data?: Record<string, string | number | boolean>
 }
 
+type BroadcastPayload = {
+  role: "passenger" | "driver"
+  title: string
+  body: string
+  type?: "ride_update" | "payment" | "system"
+  data?: Record<string, string | number | boolean>
+  excludeUserId?: string
+}
+
 const INVALID_TOKEN_ERRORS = new Set([
   "messaging/invalid-registration-token",
   "messaging/registration-token-not-registered",
@@ -68,30 +77,95 @@ export async function sendPushToUser(
     return
   }
 
-  const data = serializeData(payload.data)
-  const response = await firebaseAdmin.messaging().sendEachForMulticast({
-    tokens: tokens.map((t) => t.token),
-    notification: {
-      title: payload.title,
-      body: payload.body,
-    },
-    data,
-  })
+  await sendPushToTokens(tokens.map((t) => t.token), payload)
+}
 
-  if (response.failureCount > 0) {
-    const invalidTokens: string[] = []
-    response.responses.forEach((result, index) => {
-      if (result.success) return
-      const code = result.error?.code
-      if (code && INVALID_TOKEN_ERRORS.has(code)) {
-        invalidTokens.push(tokens[index].token)
-      }
+async function sendPushToTokens(
+  tokens: string[],
+  payload: {
+    title: string
+    body: string
+    data?: Record<string, string | number | boolean>
+  }
+) {
+  if (!firebaseConfigured || !firebaseAdmin || tokens.length === 0) {
+    return
+  }
+
+  const data = serializeData(payload.data)
+  const invalidTokens: string[] = []
+
+  for (let i = 0; i < tokens.length; i += 500) {
+    const batch = tokens.slice(i, i + 500)
+    const response = await firebaseAdmin.messaging().sendEachForMulticast({
+      tokens: batch,
+      notification: {
+        title: payload.title,
+        body: payload.body,
+      },
+      data,
     })
 
-    if (invalidTokens.length > 0) {
-      await prisma.deviceToken.deleteMany({
-        where: { token: { in: invalidTokens } },
+    if (response.failureCount > 0) {
+      response.responses.forEach((result, index) => {
+        if (result.success) return
+        const code = result.error?.code
+        if (code && INVALID_TOKEN_ERRORS.has(code)) {
+          invalidTokens.push(batch[index])
+        }
       })
     }
+  }
+
+  if (invalidTokens.length > 0) {
+    await prisma.deviceToken.deleteMany({
+      where: { token: { in: invalidTokens } },
+    })
+  }
+}
+
+export async function notifyUsersByRole(payload: BroadcastPayload) {
+  try {
+    const tokens = await prisma.deviceToken.findMany({
+      where: {
+        user: {
+          roleDefault: payload.role,
+          ...(payload.excludeUserId ? { id: { not: payload.excludeUserId } } : {}),
+        },
+      },
+      select: {
+        token: true,
+        userId: true,
+      },
+    })
+
+    if (tokens.length === 0) {
+      return { notified: 0 }
+    }
+
+    const userIds = Array.from(new Set(tokens.map((t) => t.userId)))
+
+    await prisma.notification.createMany({
+      data: userIds.map((userId) => ({
+        userId,
+        title: payload.title,
+        body: payload.body,
+        type: payload.type ?? "system",
+      })),
+    })
+
+    await sendPushToTokens(
+      tokens.map((t) => t.token),
+      {
+        title: payload.title,
+        body: payload.body,
+        data: payload.data,
+      }
+    )
+
+    return { notified: userIds.length }
+  } catch (err) {
+    console.error("broadcast notification error", err)
+    return { notified: 0 }
   }
 }
