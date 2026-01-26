@@ -3,6 +3,7 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { resolveSeatPrice } from "../lib/pricing.js"
+import { notifyUser } from "../lib/notifications.js"
 
 interface CreateRideBody {
   fromCity: string
@@ -527,10 +528,31 @@ export async function startRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Only open rides can be started" })
     }
 
+    const bookings = await prisma.booking.findMany({
+      where: { rideId: id, status: "confirmed" },
+      select: { id: true, passengerId: true },
+    })
+
     const updatedRide = await prisma.ride.update({
       where: { id },
       data: { status: "ongoing" },
     })
+
+    await Promise.all(
+      bookings.map((booking) =>
+        notifyUser({
+          userId: booking.passengerId,
+          title: "Ride started",
+          body: `${ride.fromCity} → ${ride.toCity} has started`,
+          type: "ride_update",
+          data: {
+            rideId: ride.id,
+            bookingId: booking.id,
+            kind: "ride_started",
+          },
+        })
+      )
+    )
 
     return res.json(updatedRide)
   } catch (err) {
@@ -569,6 +591,11 @@ export async function completeRide(req: AuthRequest, res: Response) {
         .json({ error: "Only ongoing rides can be completed" })
     }
 
+    const bookings = await prisma.booking.findMany({
+      where: { rideId: id, status: "confirmed" },
+      select: { id: true, passengerId: true },
+    })
+
     const [updatedRide, updatedBookings] = await prisma.$transaction([
       prisma.ride.update({
         where: { id },
@@ -579,6 +606,22 @@ export async function completeRide(req: AuthRequest, res: Response) {
         data: { status: "completed" },
       }),
     ])
+
+    await Promise.all(
+      bookings.map((booking) =>
+        notifyUser({
+          userId: booking.passengerId,
+          title: "Ride completed",
+          body: `${ride.fromCity} → ${ride.toCity} has completed`,
+          type: "ride_update",
+          data: {
+            rideId: ride.id,
+            bookingId: booking.id,
+            kind: "ride_completed",
+          },
+        })
+      )
+    )
 
     return res.json({ ride: updatedRide, bookings: updatedBookings })
   } catch (err) {
@@ -617,6 +660,11 @@ export async function cancelRide(req: AuthRequest, res: Response) {
         .json({ error: "Only open or ongoing rides can be cancelled" })
     }
 
+    const bookings = await prisma.booking.findMany({
+      where: { rideId: id, status: { in: ["pending", "confirmed"] } },
+      select: { id: true, passengerId: true },
+    })
+
     const [updatedRide, updatedBookings] = await prisma.$transaction([
       prisma.ride.update({
         where: { id },
@@ -630,6 +678,22 @@ export async function cancelRide(req: AuthRequest, res: Response) {
         data: { status: "cancelled_by_driver" },
       }),
     ])
+
+    await Promise.all(
+      bookings.map((booking) =>
+        notifyUser({
+          userId: booking.passengerId,
+          title: "Ride cancelled",
+          body: `${ride.fromCity} → ${ride.toCity} was cancelled by the driver`,
+          type: "ride_update",
+          data: {
+            rideId: ride.id,
+            bookingId: booking.id,
+            kind: "ride_cancelled_by_driver",
+          },
+        })
+      )
+    )
 
     return res.json({ ride: updatedRide, bookings: updatedBookings })
   } catch (err) {

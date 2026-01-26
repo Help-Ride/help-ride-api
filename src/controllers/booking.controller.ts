@@ -2,6 +2,7 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { notifyUser } from "../lib/notifications.js"
 
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
@@ -86,7 +87,17 @@ export async function createBooking(req: AuthRequest, res: Response) {
       },
     })
 
-    // TODO: create notification for driver (booking_request)
+    await notifyUser({
+      userId: ride.driverId,
+      title: "New booking request",
+      body: `${booking.ride.fromCity} → ${booking.ride.toCity} (${booking.seatsBooked} seat${booking.seatsBooked === 1 ? "" : "s"})`,
+      type: "ride_update",
+      data: {
+        bookingId: booking.id,
+        rideId: booking.rideId,
+        kind: "booking_request",
+      },
+    })
 
     return res.status(201).json(booking)
   } catch (err) {
@@ -324,6 +335,18 @@ export async function cancelBookingByPassenger(req: AuthRequest, res: Response) 
         : []),
     ])
 
+    await notifyUser({
+      userId: booking.ride.driverId,
+      title: "Booking cancelled",
+      body: `${booking.ride.fromCity} → ${booking.ride.toCity} was cancelled by the passenger`,
+      type: "ride_update",
+      data: {
+        bookingId: booking.id,
+        rideId: booking.rideId,
+        kind: "booking_cancelled_by_passenger",
+      },
+    })
+
     return res.json({
       booking: updatedBooking,
       ride: updatedRide,
@@ -391,6 +414,18 @@ export async function cancelBookingByDriver(req: AuthRequest, res: Response) {
           ]
         : []),
     ])
+
+    await notifyUser({
+      userId: booking.passengerId,
+      title: "Booking cancelled",
+      body: `${booking.ride.fromCity} → ${booking.ride.toCity} was cancelled by the driver`,
+      type: "ride_update",
+      data: {
+        bookingId: booking.id,
+        rideId: booking.rideId,
+        kind: "booking_cancelled_by_driver",
+      },
+    })
 
     return res.json({
       booking: updatedBooking,
@@ -469,7 +504,17 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
       }),
     ])
 
-    // TODO: notification to passenger (booking_confirmed)
+    await notifyUser({
+      userId: booking.passengerId,
+      title: "Booking confirmed",
+      body: `${booking.ride.fromCity} → ${booking.ride.toCity} is confirmed`,
+      type: "ride_update",
+      data: {
+        bookingId: booking.id,
+        rideId: booking.rideId,
+        kind: "booking_confirmed",
+      },
+    })
 
     return res.json({
       booking: updatedBooking,
@@ -524,7 +569,17 @@ export async function rejectBooking(req: AuthRequest, res: Response) {
       },
     })
 
-    // TODO: notification to passenger (booking_rejected)
+    await notifyUser({
+      userId: booking.passengerId,
+      title: "Booking rejected",
+      body: `${booking.ride.fromCity} → ${booking.ride.toCity} was rejected`,
+      type: "ride_update",
+      data: {
+        bookingId: booking.id,
+        rideId: booking.rideId,
+        kind: "booking_rejected",
+      },
+    })
 
     return res.json(updated)
   } catch (err) {

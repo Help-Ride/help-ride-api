@@ -6,6 +6,11 @@ import { AuthRequest } from "../middleware/auth.js"
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
 
+interface RegisterDeviceTokenBody {
+  token?: string
+  platform?: "ios" | "android" | "web"
+}
+
 /**
  * GET /api/notifications?isRead=false&limit=50&cursor=<notificationId>
  */
@@ -54,6 +59,71 @@ export async function listNotifications(req: AuthRequest, res: Response) {
     return res.json({ notifications, nextCursor })
   } catch (err) {
     console.error("GET /notifications error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/notifications/tokens/register
+ * Body: { token, platform? }
+ */
+export async function registerDeviceToken(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { token, platform } = (req.body ?? {}) as RegisterDeviceTokenBody
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ error: "token is required" })
+    }
+
+    if (platform && !["ios", "android", "web"].includes(platform)) {
+      return res.status(400).json({ error: "Invalid platform" })
+    }
+
+    const saved = await prisma.deviceToken.upsert({
+      where: { token },
+      update: {
+        userId: req.userId,
+        platform: platform ?? undefined,
+      },
+      create: {
+        userId: req.userId,
+        token,
+        platform: platform ?? undefined,
+      },
+    })
+
+    return res.status(201).json(saved)
+  } catch (err) {
+    console.error("POST /notifications/tokens/register error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/notifications/tokens/unregister
+ * Body: { token }
+ */
+export async function unregisterDeviceToken(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { token } = (req.body ?? {}) as RegisterDeviceTokenBody
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ error: "token is required" })
+    }
+
+    const removed = await prisma.deviceToken.deleteMany({
+      where: { userId: req.userId, token },
+    })
+
+    return res.json({ removed: removed.count })
+  } catch (err) {
+    console.error("POST /notifications/tokens/unregister error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

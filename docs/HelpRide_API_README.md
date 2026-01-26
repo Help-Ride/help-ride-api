@@ -136,6 +136,12 @@ The API resolves the final per-seat price on create/update using these rules:
 
 ---
 
+### Search Rides (Geolocation)
+
+`GET /rides?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25&seats=1`
+
+---
+
 ### Get Ride by ID
 
 `GET /rides/{rideId}`
@@ -327,6 +333,12 @@ Passengers create ride requests; drivers can browse pending requests and offer r
 
 ---
 
+### List Ride Requests (Geolocation)
+
+`GET /ride-requests?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25`
+
+---
+
 ### My Ride Requests
 
 `GET /ride-requests/me/list`
@@ -392,6 +404,31 @@ Accepting an offer confirms the ride and creates a confirmed booking.
 
 ---
 
+### Register Device Token (FCM)
+
+`POST /notifications/tokens/register`
+
+```json
+{
+  "token": "<fcm_device_token>",
+  "platform": "android"
+}
+```
+
+---
+
+### Unregister Device Token (FCM)
+
+`POST /notifications/tokens/unregister`
+
+```json
+{
+  "token": "<fcm_device_token>"
+}
+```
+
+---
+
 ### Mark Notification Read
 
 `POST /notifications/{notificationId}/read`
@@ -454,6 +491,9 @@ DATABASE_URL=postgresql://...
 JWT_ACCESS_SECRET=...
 JWT_REFRESH_SECRET=...
 NODE_ENV=development
+FIREBASE_PROJECT_ID=...
+FIREBASE_CLIENT_EMAIL=...
+FIREBASE_PRIVATE_KEY=...
 ```
 
 ---

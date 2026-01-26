@@ -50,6 +50,12 @@ enum NotificationType {
   system
 }
 
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
 enum DriverDocumentType {
   license
   insurance
@@ -110,6 +116,7 @@ model User {
   passengerConversations Conversation[] @relation("PassengerConversations")
   driverConversations    Conversation[] @relation("DriverConversations")
   messages               Message[]
+  deviceTokens           DeviceToken[]
 }
 
 model OAuthAccount {
@@ -233,6 +240,18 @@ model Notification {
   type        NotificationType @default(system)
   isRead      Boolean          @default(false)
   createdAt   DateTime         @default(now())
+}
+
+model DeviceToken {
+  id        String          @id @default(uuid())
+  user      User            @relation(fields: [userId], references: [id])
+  userId    String
+  token     String          @unique
+  platform  DevicePlatform?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([userId])
 }
 
 model SosEvent {

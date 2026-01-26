@@ -2,6 +2,7 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { notifyUser } from "../lib/notifications.js"
 
 interface CreateOfferBody {
   rideId?: string
@@ -87,6 +88,19 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
         rideId: ride.id,
         seatsOffered: seats,
         pricePerSeat: ride.pricePerSeat,
+      },
+    })
+
+    await notifyUser({
+      userId: rideRequest.passengerId,
+      title: "New ride offer",
+      body: `${ride.fromCity} → ${ride.toCity} has a new offer`,
+      type: "ride_update",
+      data: {
+        offerId: offer.id,
+        rideRequestId: rideRequest.id,
+        rideId: ride.id,
+        kind: "ride_request_offer_created",
       },
     })
 
@@ -281,6 +295,20 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       }),
     ])
 
+    await notifyUser({
+      userId: offer.driverId,
+      title: "Offer accepted",
+      body: `${offer.ride.fromCity} → ${offer.ride.toCity} offer was accepted`,
+      type: "ride_update",
+      data: {
+        offerId: offer.id,
+        rideRequestId: offer.rideRequestId,
+        rideId: offer.rideId,
+        bookingId: booking.id,
+        kind: "ride_request_offer_accepted",
+      },
+    })
+
     return res.json({
       offer: updatedOffer,
       rideRequest: updatedRequest,
@@ -336,6 +364,19 @@ export async function rejectRideRequestOffer(req: AuthRequest, res: Response) {
       data: { status: "rejected" },
     })
 
+    await notifyUser({
+      userId: offer.driverId,
+      title: "Offer rejected",
+      body: "Your ride offer was rejected",
+      type: "ride_update",
+      data: {
+        offerId: offer.id,
+        rideRequestId: offer.rideRequestId,
+        rideId: offer.rideId,
+        kind: "ride_request_offer_rejected",
+      },
+    })
+
     return res.json(updated)
   } catch (err) {
     console.error("PUT /ride-requests/:id/offers/:offerId/reject error", err)
@@ -362,6 +403,7 @@ export async function cancelRideRequestOffer(req: AuthRequest, res: Response) {
 
     const offer = await prisma.rideRequestOffer.findUnique({
       where: { id: offerId },
+      include: { rideRequest: true, ride: true },
     })
 
     if (!offer || offer.rideRequestId !== rideRequestId) {
@@ -383,6 +425,19 @@ export async function cancelRideRequestOffer(req: AuthRequest, res: Response) {
     const updated = await prisma.rideRequestOffer.update({
       where: { id: offer.id },
       data: { status: "cancelled" },
+    })
+
+    await notifyUser({
+      userId: offer.rideRequest.passengerId,
+      title: "Offer cancelled",
+      body: `${offer.ride.fromCity} → ${offer.ride.toCity} offer was cancelled`,
+      type: "ride_update",
+      data: {
+        offerId: offer.id,
+        rideRequestId: offer.rideRequestId,
+        rideId: offer.rideId,
+        kind: "ride_request_offer_cancelled",
+      },
     })
 
     return res.json(updated)
