@@ -22,7 +22,9 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
     const { rideId, seatsOffered } = (req.body ?? {}) as CreateOfferBody
 
     if (!rideRequestId || !rideId) {
-      return res.status(400).json({ error: "rideRequestId and rideId are required" })
+      return res
+        .status(400)
+        .json({ error: "rideRequestId and rideId are required" })
     }
 
     const [rideRequest, ride] = await Promise.all([
@@ -43,11 +45,15 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
     }
 
     if (ride.driverId !== req.userId) {
-      return res.status(403).json({ error: "You are not the driver for this ride" })
+      return res
+        .status(403)
+        .json({ error: "You are not the driver for this ride" })
     }
 
     if (ride.driverId === rideRequest.passengerId) {
-      return res.status(400).json({ error: "You cannot offer your own request" })
+      return res
+        .status(400)
+        .json({ error: "You cannot offer your own request" })
     }
 
     if (ride.status !== "open") {
@@ -55,9 +61,13 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
     }
 
     const seats =
-      seatsOffered !== undefined ? Number(seatsOffered) : rideRequest.seatsNeeded
+      seatsOffered !== undefined
+        ? Number(seatsOffered)
+        : rideRequest.seatsNeeded
     if (!Number.isFinite(seats) || seats <= 0) {
-      return res.status(400).json({ error: "seatsOffered must be a positive integer" })
+      return res
+        .status(400)
+        .json({ error: "seatsOffered must be a positive integer" })
     }
 
     if (seats < rideRequest.seatsNeeded) {
@@ -211,7 +221,9 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
     }
 
     if (offer.status !== "pending") {
-      return res.status(400).json({ error: "Only pending offers can be accepted" })
+      return res
+        .status(400)
+        .json({ error: "Only pending offers can be accepted" })
     }
 
     if (offer.rideRequest.status !== "pending") {
@@ -226,43 +238,48 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Not enough seats available" })
     }
 
-    const [updatedOffer, updatedRequest, booking, updatedRide, _rejectedOffers] =
-      await prisma.$transaction([
-        prisma.rideRequestOffer.update({
-          where: { id: offer.id },
-          data: { status: "accepted" },
-        }),
-        prisma.rideRequest.update({
-          where: { id: offer.rideRequestId },
-          data: { status: "matched" },
-        }),
-        prisma.booking.create({
-          data: {
-            rideId: offer.rideId,
-            passengerId: offer.rideRequest.passengerId,
-            seatsBooked: offer.seatsOffered,
-            status: "confirmed",
-          },
-        }),
-        prisma.ride.update({
-          where: { id: offer.rideId },
-          data: {
-            seatsAvailable: offer.ride.seatsAvailable - offer.seatsOffered,
-            status:
-              offer.ride.seatsAvailable - offer.seatsOffered <= 0
-                ? "open"
-                : offer.ride.status,
-          },
-        }),
-        prisma.rideRequestOffer.updateMany({
-          where: {
-            rideRequestId: offer.rideRequestId,
-            status: "pending",
-            NOT: { id: offer.id },
-          },
-          data: { status: "rejected" },
-        }),
-      ])
+    const [
+      updatedOffer,
+      updatedRequest,
+      booking,
+      updatedRide,
+      _rejectedOffers,
+    ] = await prisma.$transaction([
+      prisma.rideRequestOffer.update({
+        where: { id: offer.id },
+        data: { status: "accepted" },
+      }),
+      prisma.rideRequest.update({
+        where: { id: offer.rideRequestId },
+        data: { status: "matched" },
+      }),
+      prisma.booking.create({
+        data: {
+          rideId: offer.rideId,
+          passengerId: offer.rideRequest.passengerId,
+          seatsBooked: offer.seatsOffered,
+          status: "confirmed",
+        },
+      }),
+      prisma.ride.update({
+        where: { id: offer.rideId },
+        data: {
+          seatsAvailable: offer.ride.seatsAvailable - offer.seatsOffered,
+          status:
+            offer.ride.seatsAvailable - offer.seatsOffered <= 0
+              ? "open"
+              : offer.ride.status,
+        },
+      }),
+      prisma.rideRequestOffer.updateMany({
+        where: {
+          rideRequestId: offer.rideRequestId,
+          status: "pending",
+          NOT: { id: offer.id },
+        },
+        data: { status: "rejected" },
+      }),
+    ])
 
     return res.json({
       offer: updatedOffer,
@@ -309,7 +326,9 @@ export async function rejectRideRequestOffer(req: AuthRequest, res: Response) {
     }
 
     if (offer.status !== "pending") {
-      return res.status(400).json({ error: "Only pending offers can be rejected" })
+      return res
+        .status(400)
+        .json({ error: "Only pending offers can be rejected" })
     }
 
     const updated = await prisma.rideRequestOffer.update({
@@ -356,7 +375,9 @@ export async function cancelRideRequestOffer(req: AuthRequest, res: Response) {
     }
 
     if (offer.status !== "pending") {
-      return res.status(400).json({ error: "Only pending offers can be cancelled" })
+      return res
+        .status(400)
+        .json({ error: "Only pending offers can be cancelled" })
     }
 
     const updated = await prisma.rideRequestOffer.update({

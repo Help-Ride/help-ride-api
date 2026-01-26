@@ -10,6 +10,7 @@
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
 @bookingId =
 @conversationId =
+@notificationId =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @email = patel.rishi3001@gmail.com
 @otp = 332576
@@ -259,6 +260,34 @@ Authorization: Bearer {{accessToken}}
 
 ###
 
+###########################################
+### 🚦 RIDE LIFECYCLE (driver only)
+###########################################
+### START RIDE
+POST {{baseUrl}}/rides/{{rideId}}/start
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### COMPLETE RIDE
+POST {{baseUrl}}/rides/{{rideId}}/complete
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### CANCEL RIDE (with reason)
+POST {{baseUrl}}/rides/{{rideId}}/cancel
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Driver unavailable"
+}
+
+###
+
 ################################################
 ### 📩 BOOKINGS – PASSENGER & DRIVER
 ################################################
@@ -297,6 +326,13 @@ Accept: application/json
 
 ###
 
+### DRIVER: INBOX (PAGINATED BOOKINGS)
+GET {{baseUrl}}/bookings/driver/me?status=pending&limit=50&cursor=
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### DRIVER: CONFIRM BOOKING
 PUT {{baseUrl}}/bookings/{{bookingId}}/confirm
 Authorization: Bearer {{accessToken}}
@@ -306,6 +342,20 @@ Accept: application/json
 
 ### DRIVER: REJECT BOOKING
 PUT {{baseUrl}}/bookings/{{bookingId}}/reject
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### PASSENGER: CANCEL BOOKING
+POST {{baseUrl}}/bookings/{{bookingId}}/cancel
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: CANCEL PASSENGER BOOKING
+POST {{baseUrl}}/bookings/{{bookingId}}/driver-cancel
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
@@ -539,6 +589,30 @@ Accept: application/json
 
 ###
 
+################################################
+### 🔔 NOTIFICATIONS
+################################################
+
+### LIST MY NOTIFICATIONS (PAGINATED)
+GET {{baseUrl}}/notifications?isRead=false&limit=50&cursor=
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### MARK NOTIFICATION READ
+POST {{baseUrl}}/notifications/{{notificationId}}/read
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### MARK ALL NOTIFICATIONS READ
+POST {{baseUrl}}/notifications/read-all
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
 ################################################
 ### 👤 USER PROFILE UPDATE
 ################################################

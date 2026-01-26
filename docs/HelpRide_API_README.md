@@ -154,6 +154,22 @@ The API resolves the final per-seat price on create/update using these rules:
 
 ---
 
+### Ride Lifecycle (Driver)
+
+- Start: `POST /rides/{rideId}/start`
+- Complete: `POST /rides/{rideId}/complete`
+- Cancel: `POST /rides/{rideId}/cancel`
+
+Cancel body:
+
+```json
+{
+  "reason": "Driver unavailable"
+}
+```
+
+---
+
 ## 📩 Bookings
 
 ### Create Booking (Passenger)
@@ -174,9 +190,39 @@ The API resolves the final per-seat price on create/update using these rules:
 
 ---
 
+### Driver Inbox (Bookings)
+
+`GET /bookings/driver/me?status=pending&limit=50&cursor=...`
+
+---
+
 ### Ride Bookings (Driver)
 
 `GET /bookings/ride/{rideId}`
+
+---
+
+### Confirm Booking (Driver)
+
+`PUT /bookings/{bookingId}/confirm`
+
+---
+
+### Reject Booking (Driver)
+
+`PUT /bookings/{bookingId}/reject`
+
+---
+
+### Cancel Booking (Passenger)
+
+`POST /bookings/{bookingId}/cancel`
+
+---
+
+### Cancel Booking (Driver)
+
+`POST /bookings/{bookingId}/driver-cancel`
 
 ---
 
@@ -335,6 +381,26 @@ Accepting an offer confirms the ride and creates a confirmed booking.
 ### Cancel Offer (Driver)
 
 `PUT /ride-requests/{rideRequestId}/offers/{offerId}/cancel`
+
+---
+
+## 🔔 Notifications
+
+### List Notifications (Paginated)
+
+`GET /notifications?isRead=false&limit=50&cursor=...`
+
+---
+
+### Mark Notification Read
+
+`POST /notifications/{notificationId}/read`
+
+---
+
+### Mark All Notifications Read
+
+`POST /notifications/read-all`
 
 ---
 

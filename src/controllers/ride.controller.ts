@@ -498,3 +498,142 @@ export async function deleteRide(req: AuthRequest, res: Response) {
     return res.status(500).json({ error: "Internal server error" })
   }
 }
+
+/**
+ * POST /api/rides/:id/start
+ * Driver starts ride
+ */
+export async function startRide(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: "Ride id is required" })
+    }
+
+    const ride = await prisma.ride.findUnique({ where: { id } })
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" })
+    }
+
+    if (ride.driverId !== req.userId) {
+      return res.status(403).json({ error: "Forbidden" })
+    }
+
+    if (ride.status !== "open") {
+      return res.status(400).json({ error: "Only open rides can be started" })
+    }
+
+    const updatedRide = await prisma.ride.update({
+      where: { id },
+      data: { status: "ongoing" },
+    })
+
+    return res.json(updatedRide)
+  } catch (err) {
+    console.error("POST /api/rides/:id/start error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/rides/:id/complete
+ * Driver completes ride
+ */
+export async function completeRide(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: "Ride id is required" })
+    }
+
+    const ride = await prisma.ride.findUnique({ where: { id } })
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" })
+    }
+
+    if (ride.driverId !== req.userId) {
+      return res.status(403).json({ error: "Forbidden" })
+    }
+
+    if (ride.status !== "ongoing") {
+      return res
+        .status(400)
+        .json({ error: "Only ongoing rides can be completed" })
+    }
+
+    const [updatedRide, updatedBookings] = await prisma.$transaction([
+      prisma.ride.update({
+        where: { id },
+        data: { status: "completed" },
+      }),
+      prisma.booking.updateMany({
+        where: { rideId: id, status: "confirmed" },
+        data: { status: "completed" },
+      }),
+    ])
+
+    return res.json({ ride: updatedRide, bookings: updatedBookings })
+  } catch (err) {
+    console.error("POST /api/rides/:id/complete error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/rides/:id/cancel
+ * Driver cancels ride
+ */
+export async function cancelRide(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: "Ride id is required" })
+    }
+
+    const ride = await prisma.ride.findUnique({ where: { id } })
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" })
+    }
+
+    if (ride.driverId !== req.userId) {
+      return res.status(403).json({ error: "Forbidden" })
+    }
+
+    if (!["open", "ongoing"].includes(ride.status)) {
+      return res
+        .status(400)
+        .json({ error: "Only open or ongoing rides can be cancelled" })
+    }
+
+    const [updatedRide, updatedBookings] = await prisma.$transaction([
+      prisma.ride.update({
+        where: { id },
+        data: { status: "cancelled" },
+      }),
+      prisma.booking.updateMany({
+        where: {
+          rideId: id,
+          status: { in: ["pending", "confirmed"] },
+        },
+        data: { status: "cancelled_by_driver" },
+      }),
+    ])
+
+    return res.json({ ride: updatedRide, bookings: updatedBookings })
+  } catch (err) {
+    console.error("POST /api/rides/:id/cancel error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
