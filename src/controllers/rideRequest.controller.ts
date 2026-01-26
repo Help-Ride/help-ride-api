@@ -2,74 +2,53 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { Prisma } from "../generated/prisma/client.js"
+import { notifyUsersByRole } from "../lib/notifications.js"
 
-interface CreateRideBody {
+interface CreateRideRequestBody {
   fromCity?: string
   fromLat?: number
   fromLng?: number
   toCity?: string
   toLat?: number
   toLng?: number
-  startTime?: string // ISO
-  arrivalTime?: string // ISO (optional)
-  pricePerSeat?: number
-  seatsTotal?: number
+  preferredDate?: string // ISO
+  preferredTime?: string
+  arrivalTime?: string
+  seatsNeeded?: number
+  rideType?: string
+  tripType?: string
+  returnDate?: string // ISO (optional)
+  returnTime?: string
 }
 
-interface UpdateRideBody {
+interface UpdateRideRequestBody {
   fromCity?: string
   fromLat?: number
   fromLng?: number
   toCity?: string
   toLat?: number
   toLng?: number
-  startTime?: string
-  arrivalTime?: string // ISO (optional, nullable)
-  pricePerSeat?: number
-  seatsTotal?: number
+  preferredDate?: string
+  preferredTime?: string
+  arrivalTime?: string | null
+  seatsNeeded?: number
+  rideType?: string
+  tripType?: string
+  returnDate?: string | null
+  returnTime?: string | null
 }
 
-function validateAndParseStartTime(startTime: string | undefined): {
+function validateAndParsePreferredDate(preferredDate: string | undefined): {
   date: Date | undefined
   error: string | null
 } {
-  if (!startTime) {
+  if (!preferredDate) {
     return { date: undefined, error: null }
   }
-  const d = new Date(startTime)
+  const d = new Date(preferredDate)
   if (Number.isNaN(d.getTime())) {
-    return { date: undefined, error: "startTime must be a valid ISO date" }
+    return { date: undefined, error: "preferredDate must be a valid ISO date" }
   }
-  return { date: d, error: null }
-}
-
-function validateAndParseArrivalTime(
-  arrivalTime: string | null | undefined,
-  startTimeDate: Date | undefined,
-  rideStartTime: Date
-): { date: Date | null | undefined; error: string | null } {
-  if (arrivalTime === undefined) {
-    return { date: undefined, error: null }
-  }
-
-  if (arrivalTime === null || arrivalTime === "") {
-    return { date: null, error: null }
-  }
-
-  const d = new Date(arrivalTime)
-  if (Number.isNaN(d.getTime())) {
-    return { date: undefined, error: "arrivalTime must be a valid ISO date" }
-  }
-
-  const baseStart = startTimeDate ?? rideStartTime
-  if (d.getTime() <= baseStart.getTime()) {
-    return {
-      date: undefined,
-      error: "arrivalTime must be after startTime",
-    }
-  }
-
   return { date: d, error: null }
 }
 
@@ -83,7 +62,7 @@ export async function createRide(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Unauthorized" })
     }
 
-    const body = (req.body ?? {}) as CreateRideBody
+    const body = (req.body ?? {}) as CreateRideRequestBody
 
     const {
       fromCity,
@@ -92,10 +71,14 @@ export async function createRide(req: AuthRequest, res: Response) {
       toCity,
       toLat,
       toLng,
-      startTime,
+      preferredDate,
+      preferredTime,
       arrivalTime,
-      pricePerSeat,
-      seatsTotal,
+      seatsNeeded,
+      rideType,
+      tripType,
+      returnDate,
+      returnTime,
     } = body
 
     // Basic validation
@@ -106,61 +89,86 @@ export async function createRide(req: AuthRequest, res: Response) {
       !toCity ||
       typeof toLat !== "number" ||
       typeof toLng !== "number" ||
-      !startTime ||
-      typeof pricePerSeat !== "number" ||
-      typeof seatsTotal !== "number"
+      !preferredDate ||
+      typeof seatsNeeded !== "number" ||
+      !rideType ||
+      !tripType
     ) {
       return res.status(400).json({
         error:
-          "fromCity, fromLat, fromLng, toCity, toLat, toLng, startTime, pricePerSeat, and seatsTotal are required",
+          "fromCity, fromLat, fromLng, toCity, toLat, toLng, preferredDate, seatsNeeded, rideType, and tripType are required",
       })
     }
 
-    const startTimeDate = new Date(startTime)
-    if (Number.isNaN(startTimeDate.getTime())) {
+    if (!Number.isFinite(seatsNeeded) || seatsNeeded <= 0) {
       return res
         .status(400)
-        .json({ error: "startTime must be a valid ISO date" })
+        .json({ error: "seatsNeeded must be a positive integer" })
     }
 
-    let arrivalTimeDate: Date | null = null
-    if (arrivalTime) {
-      const d = new Date(arrivalTime)
+    const preferredDateValue = new Date(preferredDate)
+    if (Number.isNaN(preferredDateValue.getTime())) {
+      return res
+        .status(400)
+        .json({ error: "preferredDate must be a valid ISO date" })
+    }
+
+    let returnDateValue: Date | null = null
+    if (returnDate) {
+      const d = new Date(returnDate)
       if (Number.isNaN(d.getTime())) {
         return res
           .status(400)
-          .json({ error: "arrivalTime must be a valid ISO date" })
+          .json({ error: "returnDate must be a valid ISO date" })
       }
-      // Optional sanity: arrival after start
-      if (d.getTime() <= startTimeDate.getTime()) {
-        return res.status(400).json({
-          error: "arrivalTime must be after startTime",
-        })
-      }
-      arrivalTimeDate = d
+      returnDateValue = d
     }
 
-    const ride = await prisma.ride.create({
+    const request = await prisma.rideRequest.create({
       data: {
-        driverId: req.userId,
+        passengerId: req.userId,
         fromCity,
         fromLat,
         fromLng,
         toCity,
         toLat,
         toLng,
-        startTime: startTimeDate,
-        arrivalTime: arrivalTimeDate,
-        pricePerSeat: new Prisma.Decimal(pricePerSeat),
-        seatsTotal,
-        seatsAvailable: seatsTotal,
-        status: "open",
+        preferredDate: preferredDateValue,
+        preferredTime: preferredTime ?? null,
+        arrivalTime: arrivalTime ?? null,
+        seatsNeeded,
+        rideType,
+        tripType,
+        returnDate: returnDateValue,
+        returnTime: returnTime ?? null,
+      },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
       },
     })
 
-    return res.status(201).json(ride)
+    await notifyUsersByRole({
+      role: "driver",
+      excludeUserId: req.userId,
+      title: "New ride request",
+      body: `${request.fromCity} → ${request.toCity} request posted`,
+      type: "ride_update",
+      data: {
+        rideRequestId: request.id,
+        kind: "ride_request_created",
+      },
+    })
+
+    return res.status(201).json(request)
   } catch (err) {
-    console.error("POST /rides error", err)
+    console.error("POST /ride-requests error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -172,7 +180,7 @@ export async function updateRide(req: AuthRequest, res: Response) {
     }
 
     const { id } = req.params
-    const body = (req.body ?? {}) as UpdateRideBody
+    const body = (req.body ?? {}) as UpdateRideRequestBody
 
     const {
       fromCity,
@@ -181,67 +189,92 @@ export async function updateRide(req: AuthRequest, res: Response) {
       toCity,
       toLat,
       toLng,
-      startTime,
+      preferredDate,
+      preferredTime,
       arrivalTime,
-      pricePerSeat,
-      seatsTotal,
+      seatsNeeded,
+      rideType,
+      tripType,
+      returnDate,
+      returnTime,
     } = body
 
-    const ride = await prisma.ride.findUnique({
+    const request = await prisma.rideRequest.findUnique({
       where: { id },
     })
 
-    if (!ride) {
-      return res.status(404).json({ error: "Ride not found" })
+    if (!request) {
+      return res.status(404).json({ error: "Ride request not found" })
     }
 
-    if (ride.driverId !== req.userId) {
-      return res
-        .status(403)
-        .json({ error: "You are not the driver for this ride" })
+    if (request.passengerId !== req.userId) {
+      return res.status(403).json({
+        error: "You can only update your own ride requests",
+      })
     }
 
-    const startTimeResult = validateAndParseStartTime(startTime)
-    if (startTimeResult.error) {
-      return res.status(400).json({ error: startTimeResult.error })
+    const preferredDateResult = validateAndParsePreferredDate(preferredDate)
+    if (preferredDateResult.error) {
+      return res.status(400).json({ error: preferredDateResult.error })
     }
 
-    const arrivalTimeResult = validateAndParseArrivalTime(
-      arrivalTime,
-      startTimeResult.date,
-      ride.startTime
-    )
-    if (arrivalTimeResult.error) {
-      return res.status(400).json({ error: arrivalTimeResult.error })
+    if (seatsNeeded !== undefined) {
+      if (!Number.isFinite(seatsNeeded) || seatsNeeded <= 0) {
+        return res
+          .status(400)
+          .json({ error: "seatsNeeded must be a positive integer" })
+      }
     }
 
-    const updated = await prisma.ride.update({
+    let returnDateValue: Date | null | undefined
+    if (returnDate !== undefined) {
+      if (returnDate === null || returnDate === "") {
+        returnDateValue = null
+      } else {
+        const d = new Date(returnDate)
+        if (Number.isNaN(d.getTime())) {
+          return res
+            .status(400)
+            .json({ error: "returnDate must be a valid ISO date" })
+        }
+        returnDateValue = d
+      }
+    }
+
+    const updated = await prisma.rideRequest.update({
       where: { id },
       data: {
-        fromCity: fromCity ?? ride.fromCity,
-        fromLat: fromLat ?? ride.fromLat,
-        fromLng: fromLng ?? ride.fromLng,
-        toCity: toCity ?? ride.toCity,
-        toLat: toLat ?? ride.toLat,
-        toLng: toLng ?? ride.toLng,
-        startTime: startTimeResult.date ?? ride.startTime,
-        arrivalTime:
-          arrivalTimeResult.date !== undefined
-            ? arrivalTimeResult.date
-            : ride.arrivalTime,
-        pricePerSeat:
-          pricePerSeat !== undefined
-            ? new Prisma.Decimal(pricePerSeat)
-            : ride.pricePerSeat,
-        seatsTotal: seatsTotal ?? ride.seatsTotal,
-        // You can refine this later if you want smarter seat logic
-        seatsAvailable: ride.seatsAvailable,
+        fromCity: fromCity ?? request.fromCity,
+        fromLat: fromLat ?? request.fromLat,
+        fromLng: fromLng ?? request.fromLng,
+        toCity: toCity ?? request.toCity,
+        toLat: toLat ?? request.toLat,
+        toLng: toLng ?? request.toLng,
+        preferredDate: preferredDateResult.date ?? request.preferredDate,
+        preferredTime:
+          preferredTime !== undefined ? preferredTime : request.preferredTime,
+        arrivalTime: arrivalTime !== undefined ? arrivalTime : request.arrivalTime,
+        seatsNeeded: seatsNeeded ?? request.seatsNeeded,
+        rideType: rideType ?? request.rideType,
+        tripType: tripType ?? request.tripType,
+        returnDate: returnDateValue ?? request.returnDate,
+        returnTime: returnTime !== undefined ? returnTime : request.returnTime,
+      },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
       },
     })
 
     return res.json(updated)
   } catch (err) {
-    console.error("PUT /rides/:id error", err)
+    console.error("PUT /ride-requests/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -252,10 +285,53 @@ export async function updateRide(req: AuthRequest, res: Response) {
  */
 export async function listRideRequests(req: AuthRequest, res: Response) {
   try {
-    const { fromCity, toCity, status } = req.query as {
+    const {
+      fromCity,
+      toCity,
+      status,
+      fromLat,
+      fromLng,
+      toLat,
+      toLng,
+      radiusKm,
+    } = req.query as {
       fromCity?: string
       toCity?: string
       status?: string
+      fromLat?: string
+      fromLng?: string
+      toLat?: string
+      toLng?: string
+      radiusKm?: string
+    }
+
+    const parsedFromLat = typeof fromLat === "string" ? Number(fromLat) : null
+    const parsedFromLng = typeof fromLng === "string" ? Number(fromLng) : null
+    const parsedToLat = typeof toLat === "string" ? Number(toLat) : null
+    const parsedToLng = typeof toLng === "string" ? Number(toLng) : null
+    const parsedRadiusKm =
+      typeof radiusKm === "string" ? Number(radiusKm) : 25
+
+    if (
+      (fromLat && Number.isNaN(parsedFromLat)) ||
+      (fromLng && Number.isNaN(parsedFromLng)) ||
+      (toLat && Number.isNaN(parsedToLat)) ||
+      (toLng && Number.isNaN(parsedToLng)) ||
+      (radiusKm && Number.isNaN(parsedRadiusKm))
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Invalid lat/lng or radiusKm parameter" })
+    }
+
+    if ((fromLat && !fromLng) || (!fromLat && fromLng)) {
+      return res
+        .status(400)
+        .json({ error: "Both fromLat and fromLng are required" })
+    }
+
+    if ((toLat && !toLng) || (!toLat && toLng)) {
+      return res.status(400).json({ error: "Both toLat and toLng are required" })
     }
 
     const where: any = {}
@@ -273,7 +349,58 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
       where.status = "pending"
     }
 
-    const requests = await prisma.rideRequest.findMany({
+    const hasFromCoords =
+      parsedFromLat != null &&
+      !Number.isNaN(parsedFromLat) &&
+      parsedFromLng != null &&
+      !Number.isNaN(parsedFromLng)
+    const hasToCoords =
+      parsedToLat != null &&
+      !Number.isNaN(parsedToLat) &&
+      parsedToLng != null &&
+      !Number.isNaN(parsedToLng)
+
+    const fromLocationClauses: any[] = []
+    if (fromCity && typeof fromCity === "string") {
+      fromLocationClauses.push({
+        fromCity: { contains: fromCity, mode: "insensitive" },
+      })
+    }
+    if (hasFromCoords) {
+      const bounds = buildBounds(parsedFromLat, parsedFromLng, parsedRadiusKm)
+      fromLocationClauses.push({
+        fromLat: { gte: bounds.minLat, lte: bounds.maxLat },
+        fromLng: { gte: bounds.minLng, lte: bounds.maxLng },
+      })
+    }
+
+    if (fromLocationClauses.length === 1) {
+      Object.assign(where, fromLocationClauses[0])
+    } else if (fromLocationClauses.length > 1) {
+      where.AND = [...(where.AND ?? []), { OR: fromLocationClauses }]
+    }
+
+    const toLocationClauses: any[] = []
+    if (toCity && typeof toCity === "string") {
+      toLocationClauses.push({
+        toCity: { contains: toCity, mode: "insensitive" },
+      })
+    }
+    if (hasToCoords) {
+      const bounds = buildBounds(parsedToLat, parsedToLng, parsedRadiusKm)
+      toLocationClauses.push({
+        toLat: { gte: bounds.minLat, lte: bounds.maxLat },
+        toLng: { gte: bounds.minLng, lte: bounds.maxLng },
+      })
+    }
+
+    if (toLocationClauses.length === 1) {
+      Object.assign(where, toLocationClauses[0])
+    } else if (toLocationClauses.length > 1) {
+      where.AND = [...(where.AND ?? []), { OR: toLocationClauses }]
+    }
+
+    let requests = await prisma.rideRequest.findMany({
       where,
       orderBy: { createdAt: "desc" },
       include: {
@@ -281,17 +408,79 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
+            email: true,
             providerAvatarUrl: true,
           },
         },
       },
     })
 
+    if (hasFromCoords) {
+      requests = requests.filter((request) =>
+        isWithinRadius(
+          parsedFromLat!,
+          parsedFromLng!,
+          request.fromLat,
+          request.fromLng,
+          parsedRadiusKm
+        )
+      )
+    }
+
+    if (hasToCoords) {
+      requests = requests.filter((request) =>
+        isWithinRadius(
+          parsedToLat!,
+          parsedToLng!,
+          request.toLat,
+          request.toLng,
+          parsedRadiusKm
+        )
+      )
+    }
+
     return res.json(requests)
   } catch (err) {
     console.error("GET /ride-requests error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
+}
+
+function buildBounds(lat: number, lng: number, radiusKm: number) {
+  const latKm = 110.574
+  const lngKm = 111.320 * Math.cos((lat * Math.PI) / 180)
+  const deltaLat = radiusKm / latKm
+  const deltaLng = radiusKm / Math.max(lngKm, 0.0001)
+
+  return {
+    minLat: lat - deltaLat,
+    maxLat: lat + deltaLat,
+    minLng: lng - deltaLng,
+    maxLng: lng + deltaLng,
+  }
+}
+
+function isWithinRadius(
+  originLat: number,
+  originLng: number,
+  targetLat: number,
+  targetLng: number,
+  radiusKm: number
+) {
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const earthRadiusKm = 6371
+  const dLat = toRad(targetLat - originLat)
+  const dLng = toRad(targetLng - originLng)
+  const lat1 = toRad(originLat)
+  const lat2 = toRad(targetLat)
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  const distanceKm = earthRadiusKm * c
+
+  return distanceKm <= radiusKm
 }
 
 /**
@@ -307,6 +496,16 @@ export async function getMyRideRequests(req: AuthRequest, res: Response) {
     const requests = await prisma.rideRequest.findMany({
       where: { passengerId: req.userId },
       orderBy: { createdAt: "desc" },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+      },
     })
 
     return res.json(requests)
@@ -334,6 +533,7 @@ export async function getRideRequestById(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
+            email: true,
             providerAvatarUrl: true,
           },
         },

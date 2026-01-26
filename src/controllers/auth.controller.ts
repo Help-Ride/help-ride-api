@@ -1,10 +1,15 @@
 // src/controllers/auth.controller.ts
 import type { Response } from "express"
 import bcrypt from "bcryptjs"
+import crypto from "crypto"
 import prisma from "../lib/prisma.js"
-import { signAccessToken, signRefreshToken } from "../lib/jwt.js"
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} from "../lib/jwt.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { sendEmailVerificationOtp } from "../lib/email.js"
+import { sendEmailVerificationOtp, sendPasswordResetOtp } from "../lib/email.js"
 
 interface OAuthBody {
   provider: "google" | "apple"
@@ -25,8 +30,24 @@ interface LoginBody {
   password: string
 }
 
+interface RefreshBody {
+  refreshToken: string
+}
+
+interface ResetPasswordBody {
+  email: string
+  otp: string
+  newPassword: string
+}
+
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+function hashToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("hex")
+}
+
 // Helper for issuing tokens + response shape
-function buildAuthResponse(user: {
+async function buildAuthResponse(user: {
   id: string
   name: string
   email: string
@@ -40,6 +61,16 @@ function buildAuthResponse(user: {
 
   const accessToken = signAccessToken(payload)
   const refreshToken = signRefreshToken(payload)
+  const refreshTokenHash = hashToken(refreshToken)
+  const refreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
+
+  await prisma.refreshToken.create({
+    data: {
+      userId: user.id,
+      tokenHash: refreshTokenHash,
+      expiresAt: refreshTokenExpiresAt,
+    },
+  })
 
   return {
     user: {
@@ -68,6 +99,8 @@ function generateEmailOtp() {
  */
 export async function oauthLogin(req: AuthRequest, res: Response) {
   try {
+    console.log(req.body)
+
     const { provider, providerUserId, email, name, avatarUrl } = (req.body ??
       {}) as Partial<OAuthBody>
 
@@ -116,7 +149,7 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       },
     })
 
-    const response = buildAuthResponse(user)
+    const response = await buildAuthResponse(user)
     return res.status(200).json(response)
   } catch (err) {
     console.error("POST /auth/oauth error", err)
@@ -161,7 +194,7 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         },
       })
 
-      const response = buildAuthResponse(updated)
+      const response = await buildAuthResponse(updated)
       return res.status(200).json(response)
     }
 
@@ -174,8 +207,6 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
 
     const passwordHash = await bcrypt.hash(password, 10)
 
-    const { otp, expiresAt } = generateEmailOtp()
-
     const user = await prisma.user.create({
       data: {
         name,
@@ -183,33 +214,10 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         passwordHash,
         roleDefault: "passenger",
         emailVerified: false,
-        emailVerifyOtp: otp,
-        emailVerifyOtpExpiresAt: expiresAt,
-        emailVerifyOtpAttempts: 0,
       },
     })
 
-    // Attempt to send verification OTP email, notify user if it fails
-    let emailSendFailed = false
-    try {
-      await sendEmailVerificationOtp({
-        email: user.email,
-        name: user.name,
-        otp,
-      })
-    } catch (err) {
-      console.error("Failed to send verification OTP", err)
-      emailSendFailed = true
-    }
-
-    const response = buildAuthResponse(user)
-    if (emailSendFailed) {
-      return res.status(201).json({
-        ...response,
-        warning:
-          "Account created but email verification failed. Please request a new OTP.",
-      })
-    }
+    const response = await buildAuthResponse(user)
     return res.status(201).json(response)
   } catch (err) {
     console.error("POST /auth/register error", err)
@@ -243,7 +251,7 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Invalid credentials" })
     }
 
-    const response = buildAuthResponse(user)
+    const response = await buildAuthResponse(user)
     return res.status(200).json(response)
   } catch (err) {
     console.error("POST /auth/login error", err)
@@ -286,6 +294,113 @@ export async function getMe(req: AuthRequest, res: Response) {
 }
 
 /**
+ * POST /api/auth/refresh
+ * Body: { refreshToken }
+ */
+export async function refreshTokens(req: AuthRequest, res: Response) {
+  try {
+    const { refreshToken } = (req.body ?? {}) as Partial<RefreshBody>
+    if (!refreshToken) {
+      return res.status(400).json({ error: "refreshToken is required" })
+    }
+
+    let payload: { sub: string; roleDefault: "passenger" | "driver" }
+    try {
+      payload = verifyRefreshToken(refreshToken)
+    } catch (err) {
+      return res.status(401).json({ error: "Invalid or expired refresh token" })
+    }
+
+    const tokenHash = hashToken(refreshToken)
+    const storedToken = await prisma.refreshToken.findUnique({
+      where: { tokenHash },
+    })
+
+    if (
+      !storedToken ||
+      storedToken.revokedAt ||
+      storedToken.expiresAt < new Date()
+    ) {
+      return res.status(401).json({ error: "Invalid or expired refresh token" })
+    }
+
+    if (storedToken.userId !== payload.sub) {
+      return res.status(401).json({ error: "Invalid refresh token" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: storedToken.userId },
+    })
+
+    if (!user) {
+      return res.status(401).json({ error: "Invalid refresh token" })
+    }
+
+    const newPayload = {
+      sub: user.id,
+      roleDefault: user.roleDefault,
+    }
+    const newAccessToken = signAccessToken(newPayload)
+    const newRefreshToken = signRefreshToken(newPayload)
+    const newTokenHash = hashToken(newRefreshToken)
+    const newTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
+    const now = new Date()
+
+    await prisma.$transaction(async (tx) => {
+      const replacement = await tx.refreshToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: newTokenHash,
+          expiresAt: newTokenExpiresAt,
+        },
+      })
+
+      await tx.refreshToken.update({
+        where: { id: storedToken.id },
+        data: {
+          revokedAt: now,
+          replacedByTokenId: replacement.id,
+        },
+      })
+    })
+
+    return res.status(200).json({
+      tokens: {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      },
+    })
+  } catch (err) {
+    console.error("POST /auth/refresh error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/logout
+ * Body: { refreshToken }
+ */
+export async function logout(req: AuthRequest, res: Response) {
+  try {
+    const { refreshToken } = (req.body ?? {}) as Partial<RefreshBody>
+    if (!refreshToken) {
+      return res.status(400).json({ error: "refreshToken is required" })
+    }
+
+    const tokenHash = hashToken(refreshToken)
+    await prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
+    })
+
+    return res.status(200).json({ message: "Logged out successfully." })
+  } catch (err) {
+    console.error("POST /auth/logout error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
  * POST /api/auth/verify-email/send-otp
  * Body: { email }
  * Resend OTP if user exists and not verified.
@@ -306,12 +421,6 @@ export async function sendEmailVerifyOtp(req: AuthRequest, res: Response) {
       // Don't leak existence
       return res.status(200).json({
         message: "If an account exists for this email, an OTP has been sent.",
-      })
-    }
-
-    if (user.emailVerified) {
-      return res.status(200).json({
-        message: "Email is already verified.",
       })
     }
 
@@ -359,13 +468,10 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
     const user = await prisma.user.findUnique({
       where: { email },
     })
+    console.log(email, otp, user)
 
     if (!user) {
       return res.status(400).json({ error: "Invalid email or OTP" })
-    }
-
-    if (user.emailVerified) {
-      return res.status(200).json({ message: "Email already verified." })
     }
 
     if (
@@ -373,7 +479,38 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       !user.emailVerifyOtpExpiresAt ||
       user.emailVerifyOtpExpiresAt < new Date()
     ) {
-      return res.status(400).json({ error: "OTP expired or not requested" })
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerifyOtp: newOtp,
+          emailVerifyOtpExpiresAt: expiresAt,
+          emailVerifyOtpAttempts: 0,
+        },
+      })
+
+      let emailSendFailed = false
+      try {
+        await sendEmailVerificationOtp({
+          email: user.email,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (err) {
+        console.error("Failed to resend verification OTP", err)
+        emailSendFailed = true
+      }
+
+      if (emailSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
     }
 
     // Optional: simple brute-force protection
@@ -400,17 +537,171 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       where: { id: user.id },
       data: {
         emailVerified: true,
-        emailVerifyOtp: null,
-        emailVerifyOtpExpiresAt: null,
         emailVerifyOtpAttempts: 0,
       },
     })
 
-    return res.status(200).json({
-      message: "Email verified successfully.",
-    })
+    const response = await buildAuthResponse(user)
+
+    console.log(response)
+    return res.status(200).json(response)
   } catch (err) {
     console.error("POST /auth/verify-email/verify-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/send-otp
+ * Body: { email }
+ */
+export async function sendPasswordResetOtpEmail(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    const { email } = (req.body ?? {}) as { email?: string }
+
+    if (!email) {
+      return res.status(400).json({ error: "email is required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (!user) {
+      return res.status(200).json({
+        message: "If an account exists for this email, an OTP has been sent.",
+      })
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetOtp: otp,
+        passwordResetOtpExpiresAt: expiresAt,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    await sendPasswordResetOtp({
+      email: updated.email,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Password reset OTP sent.",
+    })
+  } catch (err) {
+    console.error("POST /auth/password-reset/send-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/verify-otp
+ * Body: { email, otp, newPassword }
+ */
+export async function resetPasswordWithOtp(req: AuthRequest, res: Response) {
+  try {
+    const { email, otp, newPassword } = (req.body ?? {}) as Partial<
+      ResetPasswordBody
+    >
+
+    if (!email || !otp || !newPassword) {
+      return res
+        .status(400)
+        .json({ error: "email, otp, and newPassword are required" })
+    }
+
+    if (newPassword.length < 8) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 8 characters long" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    })
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid email or OTP" })
+    }
+
+    if (
+      !user.passwordResetOtp ||
+      !user.passwordResetOtpExpiresAt ||
+      user.passwordResetOtpExpiresAt < new Date()
+    ) {
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtp: newOtp,
+          passwordResetOtpExpiresAt: expiresAt,
+          passwordResetOtpAttempts: 0,
+        },
+      })
+
+      let emailSendFailed = false
+      try {
+        await sendPasswordResetOtp({
+          email: user.email,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (err) {
+        console.error("Failed to resend password reset OTP", err)
+        emailSendFailed = true
+      }
+
+      if (emailSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
+    }
+
+    if (user.passwordResetOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
+    if (user.passwordResetOtp !== otp) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtpAttempts: { increment: 1 },
+        },
+      })
+
+      return res.status(400).json({ error: "Invalid email or OTP" })
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordResetOtp: null,
+        passwordResetOtpExpiresAt: null,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    return res.status(200).json({ message: "Password reset successful." })
+  } catch (err) {
+    console.error("POST /auth/password-reset/verify-otp error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

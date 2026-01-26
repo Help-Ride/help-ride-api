@@ -6,6 +6,9 @@ import {
   createBooking,
   getMyBookings,
   getBookingsForRide,
+  getDriverBookingsInbox,
+  cancelBookingByPassenger,
+  cancelBookingByDriver,
   confirmBooking,
   rejectBooking,
 } from "../controllers/booking.controller.js"
@@ -20,6 +23,20 @@ router.get("/me/list", authGuard, getMyBookings)
 
 // Driver: list bookings for a ride
 router.get("/ride/:rideId", authGuard, getBookingsForRide)
+
+// Driver: inbox across all rides
+router.get("/driver/me", authGuard, getDriverBookingsInbox)
+
+// Passenger: cancel booking
+router.post("/:id/cancel", authGuard, requireVerifiedEmail, cancelBookingByPassenger)
+
+// Driver: cancel passenger booking
+router.post(
+  "/:id/driver-cancel",
+  authGuard,
+  requireVerifiedEmail,
+  cancelBookingByDriver
+)
 
 // Driver: confirm / reject booking
 router.put("/:id/confirm", authGuard, requireVerifiedEmail, confirmBooking)

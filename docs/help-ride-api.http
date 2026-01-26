@@ -2,15 +2,20 @@
 ### 🌐 ENVIRONMENT
 ################################################
 @baseUrl = http://localhost:4000/api
-# @baseUrl = https://help-ride-api.vercel.app/api
+# @baseUrl = https://dev-help-ride-api.vercel.app/api
 
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI4MzM4NiwiZXhwIjoxNzY1Mjg0Mjg2fQ.1bqLfkG3SCx3p4o5jA9VPtyNayYeY2VuB7RgtnTtyzA
+@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2ODM2NTE3NywiZXhwIjoxNzY4MzY2MDc3fQ.b2Lln5xs3MFe7kttBGRYTsWoYPX_y1FfQAte3R7BR_Y
 @driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
+@bookingId =
+@conversationId =
+@notificationId =
+@deviceToken =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @email = patel.rishi3001@gmail.com
 @otp = 332576
+@resetOtp = 112233
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -39,12 +44,36 @@ Content-Type: application/json
 
 ### LOGIN WITH EMAIL/PASSWORD
 # Use same email/password as above.
+# Note: login sends OTP; tokens are returned by verify-otp.
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
   "email": "{{email}}",
   "password": "StrongPass123!"
+}
+
+###
+
+# Set from login/register/oauth response
+@refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2OTQxMDI0MCwiZXhwIjoxNzcwMDE1MDQwLCJqdGkiOiI5MjMxNTgzMi04ZTRjLTRkNDYtOGU1Ni0xMjk2YTFmYjAyZDEifQ.5S-Vr3yo6D2X5p8kirJAo_1Mk2187vk95eQLQdV9jT4
+
+### REFRESH TOKENS
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+###
+
+### LOGOUT (REVOKE REFRESH TOKEN)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
 }
 
 ###
@@ -61,12 +90,36 @@ Content-Type: application/json
 
 ### VERIFY EMAIL WITH OTP
 # Replace {{otp}} with the 6-digit code from your email.
+# Tokens are returned on success.
 POST {{baseUrl}}/auth/verify-email/verify-otp
 Content-Type: application/json
 
 {
   "email": "{{email}}",
-  "otp": "{{otp}}"
+  "otp": "112991"
+}
+
+###
+
+### SEND PASSWORD RESET OTP
+POST {{baseUrl}}/auth/password-reset/send-otp
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+###
+
+### RESET PASSWORD WITH OTP
+# Replace {{resetOtp}} with the 6-digit code from your email.
+POST {{baseUrl}}/auth/password-reset/verify-otp
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "otp": "{{resetOtp}}",
+  "newPassword": "NewStrongPass123!"
 }
 
 ###
@@ -165,6 +218,12 @@ Accept: application/json
 
 ###
 
+### SEARCH RIDES (GEOLOCATION)
+GET {{baseUrl}}/rides?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25&seats=1
+Accept: application/json
+
+###
+
 ### GET MY RIDES  (driver only)
 GET {{baseUrl}}/rides/me/list
 Authorization: Bearer {{accessToken}}
@@ -208,6 +267,34 @@ Authorization: Bearer {{accessToken}}
 
 ###
 
+###########################################
+### 🚦 RIDE LIFECYCLE (driver only)
+###########################################
+### START RIDE
+POST {{baseUrl}}/rides/{{rideId}}/start
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### COMPLETE RIDE
+POST {{baseUrl}}/rides/{{rideId}}/complete
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### CANCEL RIDE (with reason)
+POST {{baseUrl}}/rides/{{rideId}}/cancel
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Driver unavailable"
+}
+
+###
+
 ################################################
 ### 📩 BOOKINGS – PASSENGER & DRIVER
 ################################################
@@ -229,6 +316,9 @@ Content-Type: application/json
 
 ###
 
+# Set from booking response
+# @bookingId = 00000000-0000-0000-0000-000000000000
+
 ### GET MY BOOKINGS (PASSENGER)
 GET {{baseUrl}}/bookings/me/list
 Authorization: Bearer {{accessToken}}
@@ -238,8 +328,110 @@ Accept: application/json
 
 ### DRIVER: GET BOOKINGS FOR A RIDE
 GET {{baseUrl}}/bookings/ride/{{rideId}}
-Authorization: Bearer {{driverAccessToken}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+###
+
+### DRIVER: INBOX (PAGINATED BOOKINGS)
+GET {{baseUrl}}/bookings/driver/me?status=pending&limit=50&cursor=
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: CONFIRM BOOKING
+PUT {{baseUrl}}/bookings/{{bookingId}}/confirm
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: REJECT BOOKING
+PUT {{baseUrl}}/bookings/{{bookingId}}/reject
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### PASSENGER: CANCEL BOOKING
+POST {{baseUrl}}/bookings/{{bookingId}}/cancel
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: CANCEL PASSENGER BOOKING
+POST {{baseUrl}}/bookings/{{bookingId}}/driver-cancel
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+################################################
+### 💬 CHAT (PASSENGER ↔ DRIVER)
+################################################
+
+### CREATE / GET CONVERSATION (PASSENGER)
+POST {{baseUrl}}/chat/conversations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}"
+}
+
+###
+
+### CREATE / GET CONVERSATION (DRIVER)
+POST {{baseUrl}}/chat/conversations
+Authorization: Bearer {{driverAccessToken}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}",
+  "passengerId": "{{userId}}"
+}
+
+###
+
+### LIST MY CONVERSATIONS
+GET {{baseUrl}}/chat/conversations
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+# Set from conversation response
+# @conversationId = 00000000-0000-0000-0000-000000000000
+
+### LIST MESSAGES
+GET {{baseUrl}}/chat/conversations/{{conversationId}}/messages?limit=50
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### SEND MESSAGE
+POST {{baseUrl}}/chat/conversations/{{conversationId}}/messages
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "body": "Hey, I am at the pickup point."
+}
+
+###
+
+### PUSHER AUTH (PRIVATE CHANNEL)
+POST {{baseUrl}}/chat/pusher/auth
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "socket_id": "1234.5678",
+  "channel_name": "private-conversation-{{conversationId}}"
+}
 
 ###
 
@@ -316,6 +508,12 @@ Accept: application/json
 
 ###
 
+### PUBLIC LIST RIDE REQUESTS (GEOLOCATION)
+GET {{baseUrl}}/ride-requests?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25
+Accept: application/json
+
+###
+
 ### MY RIDE REQUESTS (PASSENGER)
 GET {{baseUrl}}/ride-requests/me/list
 Authorization: Bearer {{accessToken}}
@@ -332,13 +530,125 @@ Accept: application/json
 
 ###
 
+### UPDATE OWN RIDE REQUEST
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "preferredTime": "09:30",
+  "arrivalTime": "12:00",
+  "seatsNeeded": 2
+}
+
+###
+
 ### DELETE / CANCEL OWN RIDE REQUEST
 DELETE {{baseUrl}}/ride-requests/{{rideRequestId}}
 Authorization: Bearer {{accessToken}}
 
 ###
 
+################################################
+### 🧾 RIDE REQUEST OFFERS (DRIVER ↔ PASSENGER)
+################################################
 
+### DRIVER: CREATE OFFER FOR REQUEST
+POST {{baseUrl}}/ride-requests/{{rideRequestId}}/offers
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}",
+  "seatsOffered": 1
+}
+
+###
+
+### PASSENGER: LIST OFFERS FOR A REQUEST
+GET {{baseUrl}}/ride-requests/{{rideRequestId}}/offers
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: LIST MY OFFERS
+GET {{baseUrl}}/ride-requests/offers/me/list
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+@offerId = 00000000-0000-0000-0000-000000000000
+
+### PASSENGER: ACCEPT OFFER (CONFIRMS RIDE)
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}/offers/{{offerId}}/accept
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### PASSENGER: REJECT OFFER
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}/offers/{{offerId}}/reject
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### DRIVER: CANCEL OFFER
+PUT {{baseUrl}}/ride-requests/{{rideRequestId}}/offers/{{offerId}}/cancel
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+################################################
+### 🔔 NOTIFICATIONS
+################################################
+
+### LIST MY NOTIFICATIONS (PAGINATED)
+GET {{baseUrl}}/notifications?isRead=false&limit=50&cursor=
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### REGISTER DEVICE TOKEN (FCM)
+POST {{baseUrl}}/notifications/tokens/register
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "token": "{{deviceToken}}",
+  "platform": "android"
+}
+
+###
+
+### UNREGISTER DEVICE TOKEN (FCM)
+POST {{baseUrl}}/notifications/tokens/unregister
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "token": "{{deviceToken}}"
+}
+
+###
+
+### MARK NOTIFICATION READ
+POST {{baseUrl}}/notifications/{{notificationId}}/read
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### MARK ALL NOTIFICATIONS READ
+POST {{baseUrl}}/notifications/read-all
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
 ################################################
 ### 👤 USER PROFILE UPDATE
 ################################################
@@ -373,3 +683,48 @@ Content-Type: application/json
 GET {{baseUrl}}/drivers/{{userId}}/documents
 Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+###
+
+################################################
+### 💵 FIXED ROUTE PRICING (ADMIN/MANAGEMENT)
+################################################
+
+### CREATE FIXED ROUTE PRICE
+POST {{baseUrl}}/fixed-route-prices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Brampton",
+  "toCity": "Whitby",
+  "pricePerSeat": 12,
+  "isActive": true
+}
+
+###
+
+### LIST FIXED ROUTE PRICES
+GET {{baseUrl}}/fixed-route-prices
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+@fixedRoutePriceId = 00000000-0000-0000-0000-000000000000
+
+### UPDATE FIXED ROUTE PRICE
+PUT {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "pricePerSeat": 15,
+  "isActive": true
+}
+
+###
+
+### DELETE FIXED ROUTE PRICE
+DELETE {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
+Authorization: Bearer {{accessToken}}
