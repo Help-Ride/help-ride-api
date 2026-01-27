@@ -2,6 +2,7 @@
 import { Router } from "express"
 import { authGuard } from "../middleware/auth.js"
 import { requireVerifiedEmail } from "../middleware/requireVerifiedEmail.js"
+import { rateLimit } from "../middleware/rateLimit.js"
 import {
   createRide,
   updateRide,
@@ -27,7 +28,7 @@ router.get("/me/list", authGuard, getMyRideRequests)
 router.get("/offers/me/list", authGuard, listMyRideRequestOffers)
 
 // Public list/search
-router.get("/", listRideRequests)
+router.get("/", rateLimit({ windowMs: 60_000, max: 60 }), listRideRequests)
 
 // Public detail
 router.get("/:id", getRideRequestById)

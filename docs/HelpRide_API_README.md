@@ -1098,6 +1098,10 @@ Passengers create ride requests; drivers can browse pending requests and offer r
 
 `POST /ride-requests`
 
+Notes:
+- Pickup coordinates are stored in `fromLat`/`fromLng` and are required.
+- Coordinates must be within valid ranges (lat: -90..90, lng: -180..180).
+
 ```json
 {
   "fromCity": "Waterloo",
@@ -1246,51 +1250,62 @@ Response:
 Response:
 
 ```json
-[
-  {
-    "id": "ride-request-uuid",
-    "passengerId": "passenger-uuid",
-    "fromCity": "Waterloo",
-    "toCity": "Toronto",
-    "preferredDate": "2025-12-20T08:00:00.000Z",
-    "seatsNeeded": 1,
-    "status": "pending",
-    "passenger": {
-      "id": "passenger-uuid",
-      "name": "Passenger Name",
-      "email": "passenger@example.com",
-      "providerAvatarUrl": null
+{
+  "requests": [
+    {
+      "id": "ride-request-uuid",
+      "passengerId": "passenger-uuid",
+      "fromCity": "Waterloo",
+      "toCity": "Toronto",
+      "preferredDate": "2025-12-20T08:00:00.000Z",
+      "seatsNeeded": 1,
+      "status": "pending",
+      "passenger": {
+        "id": "passenger-uuid",
+        "name": "Passenger Name",
+        "email": "passenger@example.com",
+        "providerAvatarUrl": null
+      }
     }
-  }
-]
+  ],
+  "nextCursor": "ride-request-uuid"
+}
 ```
 
 ---
 
-### List Ride Requests (Geolocation)
+### List Ride Requests (Pickup Nearby)
 
-`GET /ride-requests?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25`
+`GET /ride-requests?lat=43.4643&lng=-80.5204&radiusKm=25&limit=20`
+
+Notes:
+- `radiusKm` defaults to 25 and is capped at 100.
+- `limit` defaults to 50 (max 100).
+- Use `cursor` (rideRequestId) to fetch the next page.
 
 Response:
 
 ```json
-[
-  {
-    "id": "ride-request-uuid",
-    "passengerId": "passenger-uuid",
-    "fromCity": "Waterloo",
-    "toCity": "Toronto",
-    "preferredDate": "2025-12-20T08:00:00.000Z",
-    "seatsNeeded": 1,
-    "status": "pending",
-    "passenger": {
-      "id": "passenger-uuid",
-      "name": "Passenger Name",
-      "email": "passenger@example.com",
-      "providerAvatarUrl": null
+{
+  "requests": [
+    {
+      "id": "ride-request-uuid",
+      "passengerId": "passenger-uuid",
+      "fromCity": "Waterloo",
+      "toCity": "Toronto",
+      "preferredDate": "2025-12-20T08:00:00.000Z",
+      "seatsNeeded": 1,
+      "status": "pending",
+      "passenger": {
+        "id": "passenger-uuid",
+        "name": "Passenger Name",
+        "email": "passenger@example.com",
+        "providerAvatarUrl": null
+      }
     }
-  }
-]
+  ],
+  "nextCursor": "ride-request-uuid"
+}
 ```
 
 ---

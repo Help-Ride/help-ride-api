@@ -508,8 +508,8 @@ Accept: application/json
 
 ###
 
-### PUBLIC LIST RIDE REQUESTS (GEOLOCATION)
-GET {{baseUrl}}/ride-requests?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25
+### PUBLIC LIST RIDE REQUESTS (PICKUP NEARBY)
+GET {{baseUrl}}/ride-requests?lat=43.4643&lng=-80.5204&radiusKm=25&limit=20
 Accept: application/json
 
 ###

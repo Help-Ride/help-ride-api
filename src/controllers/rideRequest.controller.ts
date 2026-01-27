@@ -38,6 +38,11 @@ interface UpdateRideRequestBody {
   returnTime?: string | null
 }
 
+const DEFAULT_RADIUS_KM = 25
+const MAX_RADIUS_KM = 100
+const DEFAULT_PAGE_SIZE = 50
+const MAX_PAGE_SIZE = 100
+
 function validateAndParsePreferredDate(preferredDate: string | undefined): {
   date: Date | undefined
   error: string | null
@@ -50,6 +55,25 @@ function validateAndParsePreferredDate(preferredDate: string | undefined): {
     return { date: undefined, error: "preferredDate must be a valid ISO date" }
   }
   return { date: d, error: null }
+}
+
+function isValidLatitude(value: number) {
+  return Number.isFinite(value) && value >= -90 && value <= 90
+}
+
+function isValidLongitude(value: number) {
+  return Number.isFinite(value) && value >= -180 && value <= 180
+}
+
+function parseNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
 }
 
 /**
@@ -97,6 +121,18 @@ export async function createRide(req: AuthRequest, res: Response) {
       return res.status(400).json({
         error:
           "fromCity, fromLat, fromLng, toCity, toLat, toLng, preferredDate, seatsNeeded, rideType, and tripType are required",
+      })
+    }
+
+    if (!isValidLatitude(fromLat) || !isValidLongitude(fromLng)) {
+      return res.status(400).json({
+        error: "fromLat must be between -90 and 90, fromLng between -180 and 180",
+      })
+    }
+
+    if (!isValidLatitude(toLat) || !isValidLongitude(toLng)) {
+      return res.status(400).json({
+        error: "toLat must be between -90 and 90, toLng between -180 and 180",
       })
     }
 
@@ -218,6 +254,45 @@ export async function updateRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: preferredDateResult.error })
     }
 
+    if (fromLat !== undefined || fromLng !== undefined) {
+      const parsedFromLat =
+        typeof fromLat === "number" ? fromLat : parseNumber(fromLat)
+      const parsedFromLng =
+        typeof fromLng === "number" ? fromLng : parseNumber(fromLng)
+
+      if (parsedFromLat == null || parsedFromLng == null) {
+        return res
+          .status(400)
+          .json({ error: "fromLat and fromLng must be numbers" })
+      }
+
+      if (!isValidLatitude(parsedFromLat) || !isValidLongitude(parsedFromLng)) {
+        return res.status(400).json({
+          error:
+            "fromLat must be between -90 and 90, fromLng between -180 and 180",
+        })
+      }
+    }
+
+    if (toLat !== undefined || toLng !== undefined) {
+      const parsedToLat =
+        typeof toLat === "number" ? toLat : parseNumber(toLat)
+      const parsedToLng =
+        typeof toLng === "number" ? toLng : parseNumber(toLng)
+
+      if (parsedToLat == null || parsedToLng == null) {
+        return res
+          .status(400)
+          .json({ error: "toLat and toLng must be numbers" })
+      }
+
+      if (!isValidLatitude(parsedToLat) || !isValidLongitude(parsedToLng)) {
+        return res.status(400).json({
+          error: "toLat must be between -90 and 90, toLng between -180 and 180",
+        })
+      }
+    }
+
     if (seatsNeeded !== undefined) {
       if (!Number.isFinite(seatsNeeded) || seatsNeeded <= 0) {
         return res
@@ -291,37 +366,63 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
       status,
       fromLat,
       fromLng,
+      lat,
+      lng,
       toLat,
       toLng,
       radiusKm,
+      limit,
+      cursor,
     } = req.query as {
       fromCity?: string
       toCity?: string
       status?: string
       fromLat?: string
       fromLng?: string
+      lat?: string
+      lng?: string
       toLat?: string
       toLng?: string
       radiusKm?: string
+      limit?: string
+      cursor?: string
     }
 
-    const parsedFromLat = typeof fromLat === "string" ? Number(fromLat) : null
-    const parsedFromLng = typeof fromLng === "string" ? Number(fromLng) : null
-    const parsedToLat = typeof toLat === "string" ? Number(toLat) : null
-    const parsedToLng = typeof toLng === "string" ? Number(toLng) : null
+    const pickupLat = parseNumber(lat ?? fromLat)
+    const pickupLng = parseNumber(lng ?? fromLng)
+    const parsedToLat = parseNumber(toLat)
+    const parsedToLng = parseNumber(toLng)
     const parsedRadiusKm =
-      typeof radiusKm === "string" ? Number(radiusKm) : 25
+      typeof radiusKm === "string"
+        ? Number(radiusKm)
+        : radiusKm === undefined
+          ? DEFAULT_RADIUS_KM
+          : parseNumber(radiusKm) ?? DEFAULT_RADIUS_KM
+
+    const requestedLimit = parseNumber(limit)
+    const safeLimit = Math.min(
+      requestedLimit && requestedLimit > 0 ? requestedLimit : DEFAULT_PAGE_SIZE,
+      MAX_PAGE_SIZE
+    )
 
     if (
-      (fromLat && Number.isNaN(parsedFromLat)) ||
-      (fromLng && Number.isNaN(parsedFromLng)) ||
-      (toLat && Number.isNaN(parsedToLat)) ||
-      (toLng && Number.isNaN(parsedToLng)) ||
+      (lat && pickupLat == null) ||
+      (lng && pickupLng == null) ||
+      (fromLat && pickupLat == null) ||
+      (fromLng && pickupLng == null) ||
+      (toLat && parsedToLat == null) ||
+      (toLng && parsedToLng == null) ||
       (radiusKm && Number.isNaN(parsedRadiusKm))
     ) {
       return res
         .status(400)
         .json({ error: "Invalid lat/lng or radiusKm parameter" })
+    }
+
+    if ((lat && !lng) || (!lat && lng)) {
+      return res
+        .status(400)
+        .json({ error: "Both lat and lng are required" })
     }
 
     if ((fromLat && !fromLng) || (!fromLat && fromLng)) {
@@ -332,6 +433,36 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
 
     if ((toLat && !toLng) || (!toLat && toLng)) {
       return res.status(400).json({ error: "Both toLat and toLng are required" })
+    }
+
+    if (parsedRadiusKm <= 0 || parsedRadiusKm > MAX_RADIUS_KM) {
+      return res.status(400).json({
+        error: `radiusKm must be between 0 and ${MAX_RADIUS_KM}`,
+      })
+    }
+
+    if (pickupLat != null && !isValidLatitude(pickupLat)) {
+      return res
+        .status(400)
+        .json({ error: "lat must be between -90 and 90" })
+    }
+
+    if (pickupLng != null && !isValidLongitude(pickupLng)) {
+      return res
+        .status(400)
+        .json({ error: "lng must be between -180 and 180" })
+    }
+
+    if (parsedToLat != null && !isValidLatitude(parsedToLat)) {
+      return res
+        .status(400)
+        .json({ error: "toLat must be between -90 and 90" })
+    }
+
+    if (parsedToLng != null && !isValidLongitude(parsedToLng)) {
+      return res
+        .status(400)
+        .json({ error: "toLng must be between -180 and 180" })
     }
 
     const where: any = {}
@@ -349,11 +480,7 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
       where.status = "pending"
     }
 
-    const hasFromCoords =
-      parsedFromLat != null &&
-      !Number.isNaN(parsedFromLat) &&
-      parsedFromLng != null &&
-      !Number.isNaN(parsedFromLng)
+    const hasPickupCoords = pickupLat != null && pickupLng != null
     const hasToCoords =
       parsedToLat != null &&
       !Number.isNaN(parsedToLat) &&
@@ -366,8 +493,8 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
         fromCity: { contains: fromCity, mode: "insensitive" },
       })
     }
-    if (hasFromCoords) {
-      const bounds = buildBounds(parsedFromLat, parsedFromLng, parsedRadiusKm)
+    if (hasPickupCoords) {
+      const bounds = buildBounds(pickupLat!, pickupLng!, parsedRadiusKm)
       fromLocationClauses.push({
         fromLat: { gte: bounds.minLat, lte: bounds.maxLat },
         fromLng: { gte: bounds.minLng, lte: bounds.maxLng },
@@ -415,15 +542,9 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
       },
     })
 
-    if (hasFromCoords) {
+    if (hasPickupCoords) {
       requests = requests.filter((request) =>
-        isWithinRadius(
-          parsedFromLat!,
-          parsedFromLng!,
-          request.fromLat,
-          request.fromLng,
-          parsedRadiusKm
-        )
+        isWithinRadius(pickupLat!, pickupLng!, request.fromLat, request.fromLng, parsedRadiusKm)
       )
     }
 
@@ -439,7 +560,41 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
       )
     }
 
-    return res.json(requests)
+    if (hasPickupCoords) {
+      requests = requests
+        .map((request) => ({
+          request,
+          distanceKm: calculateDistanceKm(
+            pickupLat!,
+            pickupLng!,
+            request.fromLat,
+            request.fromLng
+          ),
+        }))
+        .sort((a, b) => {
+          if (a.distanceKm !== b.distanceKm) {
+            return a.distanceKm - b.distanceKm
+          }
+          return (
+            new Date(b.request.createdAt).getTime() -
+            new Date(a.request.createdAt).getTime()
+          )
+        })
+        .map((item) => item.request)
+    }
+
+    if (cursor && typeof cursor === "string") {
+      const cursorIndex = requests.findIndex((request) => request.id === cursor)
+      if (cursorIndex >= 0) {
+        requests = requests.slice(cursorIndex + 1)
+      }
+    }
+
+    const pagedRequests = requests.slice(0, safeLimit)
+    const nextCursor =
+      requests.length > safeLimit ? pagedRequests[pagedRequests.length - 1]?.id : null
+
+    return res.json({ requests: pagedRequests, nextCursor })
   } catch (err) {
     console.error("GET /ride-requests error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -467,6 +622,22 @@ function isWithinRadius(
   targetLng: number,
   radiusKm: number
 ) {
+  const distanceKm = calculateDistanceKm(
+    originLat,
+    originLng,
+    targetLat,
+    targetLng
+  )
+
+  return distanceKm <= radiusKm
+}
+
+function calculateDistanceKm(
+  originLat: number,
+  originLng: number,
+  targetLat: number,
+  targetLng: number
+) {
   const toRad = (deg: number) => (deg * Math.PI) / 180
   const earthRadiusKm = 6371
   const dLat = toRad(targetLat - originLat)
@@ -480,7 +651,7 @@ function isWithinRadius(
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   const distanceKm = earthRadiusKm * c
 
-  return distanceKm <= radiusKm
+  return distanceKm
 }
 
 /**

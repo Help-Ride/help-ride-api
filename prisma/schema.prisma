@@ -359,6 +359,7 @@ model RideRequest {
   @@index([status])
   @@index([fromCity])
   @@index([toCity])
+  @@index([fromLat, fromLng])
   @@index([passengerId])
 }
 

@@ -81,6 +81,49 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Not enough seats available" })
     }
 
+    const existingOffer = await prisma.rideRequestOffer.findUnique({
+      where: {
+        rideRequestId_driverId_rideId: {
+          rideRequestId: rideRequest.id,
+          driverId: ride.driverId,
+          rideId: ride.id,
+        },
+      },
+    })
+
+    if (existingOffer) {
+      if (["rejected", "cancelled"].includes(existingOffer.status)) {
+        const updatedOffer = await prisma.rideRequestOffer.update({
+          where: { id: existingOffer.id },
+          data: {
+            status: "pending",
+            seatsOffered: seats,
+            pricePerSeat: ride.pricePerSeat,
+          },
+        })
+
+        await notifyUser({
+          userId: rideRequest.passengerId,
+          title: "New ride offer",
+          body: `${ride.fromCity} → ${ride.toCity} has a new offer`,
+          type: "ride_update",
+          data: {
+            offerId: updatedOffer.id,
+            rideRequestId: rideRequest.id,
+            rideId: ride.id,
+            kind: "ride_request_offer_created",
+          },
+        })
+
+        return res.json(updatedOffer)
+      }
+
+      return res.status(409).json({
+        error: "Offer already exists for this ride request",
+        offer: existingOffer,
+      })
+    }
+
     const offer = await prisma.rideRequestOffer.create({
       data: {
         rideRequestId: rideRequest.id,
@@ -106,6 +149,17 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
 
     return res.status(201).json(offer)
   } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code?: string }).code === "P2002"
+    ) {
+      return res
+        .status(409)
+        .json({ error: "Offer already exists for this ride request" })
+    }
+
     console.error("POST /ride-requests/:id/offers error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
