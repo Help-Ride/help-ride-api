@@ -541,7 +541,7 @@ export async function startRide(req: AuthRequest, res: Response) {
     }
 
     const bookings = await prisma.booking.findMany({
-      where: { rideId: id, status: "confirmed" },
+      where: { rideId: id, status: { in: ["CONFIRMED", "confirmed"] } },
       select: { id: true, passengerId: true },
     })
 
@@ -604,7 +604,7 @@ export async function completeRide(req: AuthRequest, res: Response) {
     }
 
     const bookings = await prisma.booking.findMany({
-      where: { rideId: id, status: "confirmed" },
+      where: { rideId: id, status: { in: ["CONFIRMED", "confirmed"] } },
       select: { id: true, passengerId: true },
     })
 
@@ -614,7 +614,7 @@ export async function completeRide(req: AuthRequest, res: Response) {
         data: { status: "completed" },
       }),
       prisma.booking.updateMany({
-        where: { rideId: id, status: "confirmed" },
+        where: { rideId: id, status: { in: ["CONFIRMED", "confirmed"] } },
         data: { status: "completed" },
       }),
     ])
@@ -673,7 +673,12 @@ export async function cancelRide(req: AuthRequest, res: Response) {
     }
 
     const bookings = await prisma.booking.findMany({
-      where: { rideId: id, status: { in: ["pending", "confirmed"] } },
+      where: {
+        rideId: id,
+        status: {
+          in: ["pending", "confirmed", "ACCEPTED", "PAYMENT_PENDING", "CONFIRMED"],
+        },
+      },
       select: { id: true, passengerId: true },
     })
 
@@ -685,7 +690,15 @@ export async function cancelRide(req: AuthRequest, res: Response) {
       prisma.booking.updateMany({
         where: {
           rideId: id,
-          status: { in: ["pending", "confirmed"] },
+          status: {
+            in: [
+              "pending",
+              "confirmed",
+              "ACCEPTED",
+              "PAYMENT_PENDING",
+              "CONFIRMED",
+            ],
+          },
         },
         data: { status: "cancelled_by_driver" },
       }),

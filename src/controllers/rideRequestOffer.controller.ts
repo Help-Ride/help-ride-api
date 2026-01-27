@@ -281,7 +281,7 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
           rideId: offer.rideId,
           passengerId: offer.rideRequest.passengerId,
           seatsBooked: offer.seatsOffered,
-          status: "confirmed",
+          status: "ACCEPTED",
         },
         include: {
           passenger: {

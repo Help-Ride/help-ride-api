@@ -728,3 +728,30 @@ Content-Type: application/json
 ### DELETE FIXED ROUTE PRICE
 DELETE {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
 Authorization: Bearer {{accessToken}}
+
+################################################
+### 💳 STRIPE CONNECT + PAYMENTS
+################################################
+
+### DRIVER ONBOARD STRIPE (Connect Express)
+POST {{baseUrl}}/stripe/connect/onboard
+Authorization: Bearer {{driverAccessToken}}
+Content-Type: application/json
+
+{
+  "returnUrl": "https://your-app.com/stripe/return",
+  "refreshUrl": "https://your-app.com/stripe/refresh"
+}
+
+###
+
+### CREATE PAYMENT INTENT (Passenger)
+POST {{baseUrl}}/payments/intent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "bookingId": "{{bookingId}}"
+}
+
+###

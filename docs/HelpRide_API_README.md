@@ -747,7 +747,7 @@ Response:
     "rideId": "ride-uuid",
     "passengerId": "passenger-uuid",
     "seatsBooked": 1,
-    "status": "confirmed",
+    "status": "ACCEPTED",
     "paymentStatus": "unpaid",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "updatedAt": "2025-01-01T01:00:00.000Z",
@@ -916,6 +916,70 @@ Response:
   }
 }
 ```
+
+---
+
+## 💳 Stripe Payments
+
+### Driver Onboarding (Connect Express)
+
+`POST /stripe/connect/onboard`
+
+Body (optional fallback URLs can also be set via env):
+
+```json
+{
+  "returnUrl": "https://your-app.com/stripe/return",
+  "refreshUrl": "https://your-app.com/stripe/refresh"
+}
+```
+
+Response:
+
+```json
+{
+  "url": "https://connect.stripe.com/setup/s/..."
+}
+```
+
+---
+
+### Create PaymentIntent (Passenger)
+
+`POST /payments/intent`
+
+```json
+{
+  "bookingId": "booking-uuid"
+}
+```
+
+Response:
+
+```json
+{
+  "clientSecret": "pi_..._secret_..."
+}
+```
+
+Notes:
+- Booking must be `ACCEPTED`.
+- Amount is computed server-side from ride coordinates + seat pricing.
+- Booking transitions to `PAYMENT_PENDING` after intent creation.
+
+---
+
+### Stripe Webhook
+
+`POST /webhooks/stripe`
+
+Stripe dashboard configuration:
+- Endpoint URL: `/api/webhooks/stripe`
+- Events: `payment_intent.succeeded`, `payment_intent.payment_failed`
+
+Listen for:
+- `payment_intent.succeeded` → booking `CONFIRMED`
+- `payment_intent.payment_failed` → booking `ACCEPTED`
 
 ---
 
@@ -1438,7 +1502,7 @@ Response:
 
 `PUT /ride-requests/{rideRequestId}/offers/{offerId}/accept`
 
-Accepting an offer confirms the ride and creates a confirmed booking.
+Accepting an offer accepts the ride and creates an accepted booking.
 
 Response:
 
@@ -1457,7 +1521,7 @@ Response:
     "rideId": "ride-uuid",
     "passengerId": "passenger-uuid",
     "seatsBooked": 1,
-    "status": "confirmed",
+    "status": "ACCEPTED",
     "passenger": {
       "id": "passenger-uuid",
       "name": "Passenger Name",
@@ -1688,8 +1752,8 @@ Response:
     {
       "id": "notification-uuid",
       "userId": "user-uuid",
-      "title": "Booking confirmed",
-      "body": "Waterloo → Toronto is confirmed",
+      "title": "Booking accepted",
+      "body": "Waterloo → Toronto is accepted",
       "type": "ride_update",
       "isRead": false,
       "createdAt": "2025-01-01T00:00:00.000Z"
@@ -1757,8 +1821,8 @@ Response:
 {
   "id": "notification-uuid",
   "userId": "user-uuid",
-  "title": "Booking confirmed",
-  "body": "Waterloo → Toronto is confirmed",
+  "title": "Booking accepted",
+  "body": "Waterloo → Toronto is accepted",
   "type": "ride_update",
   "isRead": true,
   "createdAt": "2025-01-01T00:00:00.000Z"
@@ -1888,6 +1952,11 @@ NODE_ENV=development
 FIREBASE_PROJECT_ID=...
 FIREBASE_CLIENT_EMAIL=...
 FIREBASE_PRIVATE_KEY=...
+STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+STRIPE_PLATFORM_FEE_PCT=0.15
+STRIPE_CONNECT_RETURN_URL=... # optional fallback
+STRIPE_CONNECT_REFRESH_URL=... # optional fallback
 ```
 
 ---

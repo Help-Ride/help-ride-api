@@ -263,6 +263,9 @@ export async function getDriverBookingsInbox(req: AuthRequest, res: Response) {
     const allowedStatuses = new Set([
       "pending",
       "confirmed",
+      "ACCEPTED",
+      "PAYMENT_PENDING",
+      "CONFIRMED",
       "cancelled_by_passenger",
       "cancelled_by_driver",
       "completed",
@@ -367,13 +370,26 @@ export async function cancelBookingByPassenger(req: AuthRequest, res: Response) 
       })
     }
 
-    if (!["pending", "confirmed"].includes(booking.status)) {
+    if (
+      ![
+        "pending",
+        "confirmed",
+        "ACCEPTED",
+        "PAYMENT_PENDING",
+        "CONFIRMED",
+      ].includes(booking.status)
+    ) {
       return res.status(400).json({
-        error: "Only pending or confirmed bookings can be cancelled",
+        error: "Only active bookings can be cancelled",
       })
     }
 
-    const shouldRestoreSeats = booking.status === "confirmed"
+    const shouldRestoreSeats = [
+      "confirmed",
+      "ACCEPTED",
+      "PAYMENT_PENDING",
+      "CONFIRMED",
+    ].includes(booking.status)
 
     const [updatedBooking, updatedRide] = await prisma.$transaction([
       prisma.booking.update({
@@ -479,13 +495,26 @@ export async function cancelBookingByDriver(req: AuthRequest, res: Response) {
       })
     }
 
-    if (!["pending", "confirmed"].includes(booking.status)) {
+    if (
+      ![
+        "pending",
+        "confirmed",
+        "ACCEPTED",
+        "PAYMENT_PENDING",
+        "CONFIRMED",
+      ].includes(booking.status)
+    ) {
       return res.status(400).json({
-        error: "Only pending or confirmed bookings can be cancelled",
+        error: "Only active bookings can be cancelled",
       })
     }
 
-    const shouldRestoreSeats = booking.status === "confirmed"
+    const shouldRestoreSeats = [
+      "confirmed",
+      "ACCEPTED",
+      "PAYMENT_PENDING",
+      "CONFIRMED",
+    ].includes(booking.status)
 
     const [updatedBooking, updatedRide] = await prisma.$transaction([
       prisma.booking.update({
@@ -593,7 +622,7 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
 
     if (booking.status !== "pending") {
       return res.status(400).json({
-        error: "Only pending bookings can be confirmed",
+        error: "Only pending bookings can be accepted",
       })
     }
 
@@ -613,7 +642,7 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
       prisma.booking.update({
         where: { id: booking.id },
         data: {
-          status: "confirmed",
+          status: "ACCEPTED",
         },
       }),
       prisma.ride.update({
@@ -630,8 +659,8 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
 
     await notifyUser({
       userId: booking.passengerId,
-      title: "Booking confirmed",
-      body: `${booking.ride.fromCity} → ${booking.ride.toCity} is confirmed`,
+      title: "Booking accepted",
+      body: `${booking.ride.fromCity} → ${booking.ride.toCity} is accepted`,
       type: "ride_update",
       data: {
         bookingId: booking.id,

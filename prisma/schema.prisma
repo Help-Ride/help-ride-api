@@ -36,12 +36,18 @@ enum BookingStatus {
   cancelled_by_passenger
   cancelled_by_driver
   completed
+  ACCEPTED
+  PAYMENT_PENDING
+  CONFIRMED
 }
 
 enum PaymentStatus {
   unpaid
   paid
   refunded
+  pending
+  succeeded
+  failed
 }
 
 enum NotificationType {
@@ -91,6 +97,7 @@ model User {
   roleDefault               RoleDefault      @default(passenger)
   providerAvatarUrl         String?
   emailVerified             Boolean          @default(false)
+  stripeAccountId           String?          @unique
 
   // 🔽 NEW FIELDS FOR EMAIL OTP
   emailVerifyOtp            String?
@@ -224,11 +231,15 @@ model Payment {
   id                     String        @id @default(uuid())
   booking                Booking       @relation(fields: [bookingId], references: [id])
   bookingId              String
-  amount                 Decimal       @db.Decimal(10, 2)
+  paymentIntentId        String        @unique
+  amountCents            Int
+  platformFeeCents       Int
   currency               String        @default("cad")
-  stripePaymentIntentId  String
-  status                 PaymentStatus @default(unpaid)
+  status                 PaymentStatus @default(pending)
   createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@index([bookingId])
 }
 
 model Notification {

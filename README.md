@@ -94,6 +94,13 @@ PUSHER_KEY="your-key"
 PUSHER_SECRET="your-secret"
 PUSHER_CLUSTER="your-cluster"
 
+# Stripe
+STRIPE_SECRET_KEY="sk_test_..."
+STRIPE_WEBHOOK_SECRET="whsec_..."
+STRIPE_PLATFORM_FEE_PCT=0.15
+STRIPE_CONNECT_RETURN_URL="https://your-app.com/stripe/return"  # optional fallback
+STRIPE_CONNECT_REFRESH_URL="https://your-app.com/stripe/refresh" # optional fallback
+
 # App
 NODE_ENV="development"        # or "production"
 PORT=4000                     # local dev port

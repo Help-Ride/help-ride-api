@@ -3,12 +3,14 @@ import cors from "cors"
 import dotenv from "dotenv"
 import prisma from "./lib/prisma.js"
 import { registerRoutes } from "./routes/index.js"
+import webhookRoutes from "./routes/webhook.routes.js"
 
 dotenv.config()
 
 const app = express()
 
 app.use(cors())
+app.use("/api/webhooks", webhookRoutes)
 app.use(express.json())
 
 app.get("/api/health", (_req, res) => {

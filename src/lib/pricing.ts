@@ -33,7 +33,7 @@ async function getFixedRoutePrice(fromCity: string, toCity: string) {
   return route ? Number(route.pricePerSeat) : null
 }
 
-function haversineDistanceKm(
+export function haversineDistanceKm(
   fromLat: number,
   fromLng: number,
   toLat: number,
