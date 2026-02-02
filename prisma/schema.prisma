@@ -218,6 +218,12 @@ model Booking {
   passenger             User           @relation("PassengerBookings", fields: [passengerId], references: [id])
   passengerId           String
   seatsBooked           Int
+  passengerPickupName   String?
+  passengerPickupLat    Float?
+  passengerPickupLng    Float?
+  passengerDropoffName  String?
+  passengerDropoffLat   Float?
+  passengerDropoffLng   Float?
   status                BookingStatus  @default(pending)
   paymentStatus         PaymentStatus  @default(unpaid)
   stripePaymentIntentId String?

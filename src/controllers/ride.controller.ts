@@ -4,6 +4,7 @@ import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { resolveSeatPrice } from "../lib/pricing.js"
 import { notifyUser, notifyUsersByRole } from "../lib/notifications.js"
+import { initiateBookingRefundIfPaid } from "../lib/refunds.js"
 
 interface CreateRideBody {
   fromCity: string
@@ -717,8 +718,39 @@ export async function cancelRide(req: AuthRequest, res: Response) {
           in: ["pending", "confirmed", "ACCEPTED", "PAYMENT_PENDING", "CONFIRMED"],
         },
       },
-      select: { id: true, passengerId: true },
+      select: {
+        id: true,
+        passengerId: true,
+        status: true,
+        paymentStatus: true,
+        stripePaymentIntentId: true,
+      },
     })
+
+    const confirmedBookings = bookings.filter((booking) =>
+      ["CONFIRMED", "confirmed"].includes(booking.status)
+    )
+
+    try {
+      await Promise.all(
+        confirmedBookings.map((booking) =>
+          initiateBookingRefundIfPaid({
+            bookingId: booking.id,
+            paymentStatus: booking.paymentStatus,
+            stripePaymentIntentId: booking.stripePaymentIntentId,
+            source: "driver_cancel_ride",
+          })
+        )
+      )
+    } catch (refundErr) {
+      console.error("Refund initiation failed for ride cancellation", {
+        rideId: id,
+        err: refundErr,
+      })
+      return res.status(502).json({
+        error: "Unable to initiate refunds for confirmed bookings. Please retry.",
+      })
+    }
 
     const [updatedRide, updatedBookings] = await prisma.$transaction([
       prisma.ride.update({

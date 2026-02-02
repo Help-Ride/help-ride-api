@@ -27,7 +27,10 @@ router.post("/", authGuard, requireVerifiedEmail, createRide)
 router.put("/:id", authGuard, requireVerifiedEmail, updateRide)
 router.delete("/:id", authGuard, requireVerifiedEmail, deleteRide)
 router.post("/:id/start", authGuard, requireVerifiedEmail, startRide)
+router.put("/:id/start", authGuard, requireVerifiedEmail, startRide)
 router.post("/:id/complete", authGuard, requireVerifiedEmail, completeRide)
+router.put("/:id/complete", authGuard, requireVerifiedEmail, completeRide)
 router.post("/:id/cancel", authGuard, requireVerifiedEmail, cancelRide)
+router.put("/:id/cancel", authGuard, requireVerifiedEmail, cancelRide)
 
 export default router

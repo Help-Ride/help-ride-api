@@ -665,11 +665,17 @@ Passenger booking → driver approval → seats updated.
 
 ```json
 {
-  "seats": 1
+  "seats": 1,
+  "passengerPickupName": "Conestoga Mall, Waterloo",
+  "passengerPickupLat": 43.4723,
+  "passengerPickupLng": -80.5449,
+  "passengerDropoffName": "Union Station, Toronto",
+  "passengerDropoffLat": 43.6532,
+  "passengerDropoffLng": -79.3832
 }
 ```
 
-- Validates ride, seat availability, and user.
+- Validates ride, seat availability, user, and passenger pickup/dropoff names + coordinates.
 - Creates a `Booking` with:
   - `status = "pending"`
   - `paymentStatus = "unpaid"`
