@@ -5,6 +5,8 @@ import { requireVerifiedEmail } from "../middleware/requireVerifiedEmail.js"
 import {
   createDriverProfile,
   getDriverProfile,
+  getDriverEarnings,
+  getDriverSummary,
   updateDriverProfile,
 } from "../controllers/driver.controller.js"
 import {
@@ -16,6 +18,10 @@ const router = Router()
 
 // Create driver profile (verified user only)
 router.post("/", authGuard, requireVerifiedEmail, createDriverProfile)
+
+// Authenticated driver dashboard endpoints
+router.get("/me/summary", authGuard, getDriverSummary)
+router.get("/me/earnings", authGuard, getDriverEarnings)
 
 // Public view by userId
 router.get("/:id", getDriverProfile)

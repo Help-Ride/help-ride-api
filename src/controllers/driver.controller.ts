@@ -13,6 +13,9 @@ interface DriverProfileBody {
   insuranceInfo?: string
 }
 
+const DEFAULT_EARNINGS_PAGE_SIZE = 25
+const MAX_EARNINGS_PAGE_SIZE = 100
+
 /**
  * POST /api/drivers
  * Create driver profile for logged-in user
@@ -137,7 +140,7 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
     const body = (req.body ?? {}) as DriverProfileBody
 
     // Build update data, allowing fields to be cleared (set to null or empty string)
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, any> = {}
     const fields: (keyof DriverProfileBody)[] = [
       "carMake",
       "carModel",
@@ -146,12 +149,12 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
       "plateNumber",
       "licenseNumber",
       "insuranceInfo",
-    ];
+    ]
     for (const field of fields) {
       if (Object.prototype.hasOwnProperty.call(body, field)) {
-        updateData[field] = body[field];
+        updateData[field] = body[field]
       } else {
-        updateData[field] = existing[field];
+        updateData[field] = existing[field]
       }
     }
 
@@ -173,6 +176,230 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
     return res.json(updated)
   } catch (err) {
     console.error("PUT /api/drivers/:id error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * GET /api/drivers/me/summary
+ * Authenticated driver's rides + earnings summary.
+ */
+export async function getDriverSummary(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const [
+      totalRides,
+      completedRides,
+      pendingAgg,
+      paidAgg,
+      refundedAgg,
+      failedAgg,
+    ] = await Promise.all([
+      prisma.ride.count({
+        where: { driverId: req.userId },
+      }),
+      prisma.ride.count({
+        where: { driverId: req.userId, status: "completed" },
+      }),
+      prisma.payment.aggregate({
+        where: {
+          status: "pending",
+          booking: { ride: { driverId: req.userId } },
+        },
+        _count: { _all: true },
+        _sum: {
+          amountCents: true,
+          platformFeeCents: true,
+        },
+      }),
+      prisma.payment.aggregate({
+        where: {
+          status: { in: ["succeeded", "paid"] },
+          booking: { ride: { driverId: req.userId } },
+        },
+        _count: { _all: true },
+        _sum: {
+          amountCents: true,
+          platformFeeCents: true,
+        },
+      }),
+      prisma.payment.aggregate({
+        where: {
+          status: "refunded",
+          booking: { ride: { driverId: req.userId } },
+        },
+        _count: { _all: true },
+        _sum: {
+          amountCents: true,
+          platformFeeCents: true,
+        },
+      }),
+      prisma.payment.aggregate({
+        where: {
+          status: "failed",
+          booking: { ride: { driverId: req.userId } },
+        },
+        _count: { _all: true },
+        _sum: {
+          amountCents: true,
+          platformFeeCents: true,
+        },
+      }),
+    ])
+
+    const toDriverNet = (amountCents: number | null, feeCents: number | null) =>
+      (amountCents ?? 0) - (feeCents ?? 0)
+
+    const pendingDriverEarningsCents = toDriverNet(
+      pendingAgg._sum.amountCents,
+      pendingAgg._sum.platformFeeCents
+    )
+    const paidDriverEarningsCents = toDriverNet(
+      paidAgg._sum.amountCents,
+      paidAgg._sum.platformFeeCents
+    )
+    const refundedDriverEarningsCents = toDriverNet(
+      refundedAgg._sum.amountCents,
+      refundedAgg._sum.platformFeeCents
+    )
+    const failedDriverEarningsCents = toDriverNet(
+      failedAgg._sum.amountCents,
+      failedAgg._sum.platformFeeCents
+    )
+
+    return res.json({
+      rides: {
+        total: totalRides,
+        completed: completedRides,
+      },
+      earnings: {
+        pending: {
+          paymentsCount: pendingAgg._count._all,
+          amountCents: pendingDriverEarningsCents,
+        },
+        paid: {
+          paymentsCount: paidAgg._count._all,
+          amountCents: paidDriverEarningsCents,
+        },
+        refunded: {
+          paymentsCount: refundedAgg._count._all,
+          amountCents: refundedDriverEarningsCents,
+        },
+        failed: {
+          paymentsCount: failedAgg._count._all,
+          amountCents: failedDriverEarningsCents,
+        },
+        netCollectedCents: paidDriverEarningsCents - refundedDriverEarningsCents,
+      },
+    })
+  } catch (err) {
+    console.error("GET /api/drivers/me/summary error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * GET /api/drivers/me/earnings?status=succeeded&limit=25&cursor=<paymentId>
+ * Authenticated driver's payment records ledger.
+ */
+export async function getDriverEarnings(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const status =
+      typeof req.query.status === "string" && req.query.status.length > 0
+        ? req.query.status
+        : null
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : null
+    const limit = Math.min(
+      Number(req.query.limit ?? DEFAULT_EARNINGS_PAGE_SIZE),
+      MAX_EARNINGS_PAGE_SIZE
+    )
+
+    const allowedStatuses = new Set([
+      "pending",
+      "succeeded",
+      "failed",
+      "refunded",
+      "paid",
+    ])
+
+    if (status && !allowedStatuses.has(status)) {
+      return res.status(400).json({ error: "Invalid status filter" })
+    }
+
+    const payments = await prisma.payment.findMany({
+      where: {
+        ...(status ? { status: status as any } : {}),
+        booking: {
+          ride: {
+            driverId: req.userId,
+          },
+        },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take:
+        Number.isFinite(limit) && limit > 0
+          ? limit
+          : DEFAULT_EARNINGS_PAGE_SIZE,
+      ...(cursor
+        ? {
+            cursor: { id: cursor },
+            skip: 1,
+          }
+        : {}),
+      select: {
+        id: true,
+        paymentIntentId: true,
+        amountCents: true,
+        platformFeeCents: true,
+        currency: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        booking: {
+          select: {
+            id: true,
+            status: true,
+            paymentStatus: true,
+            seatsBooked: true,
+            passenger: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+            ride: {
+              select: {
+                id: true,
+                fromCity: true,
+                toCity: true,
+                startTime: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    const nextCursor = payments.length > 0 ? payments[payments.length - 1].id : null
+
+    return res.json({
+      payments: payments.map((payment) => ({
+        ...payment,
+        driverEarningsCents: payment.amountCents - payment.platformFeeCents,
+      })),
+      nextCursor,
+    })
+  } catch (err) {
+    console.error("GET /api/drivers/me/earnings error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

@@ -1111,6 +1111,87 @@ Response:
 
 ---
 
+### Driver Summary (Rides + Earnings)
+
+`GET /drivers/me/summary`
+
+Response:
+
+```json
+{
+  "rides": {
+    "total": 14,
+    "completed": 11
+  },
+  "earnings": {
+    "pending": {
+      "paymentsCount": 2,
+      "amountCents": 3800
+    },
+    "paid": {
+      "paymentsCount": 9,
+      "amountCents": 22450
+    },
+    "refunded": {
+      "paymentsCount": 1,
+      "amountCents": 2500
+    },
+    "failed": {
+      "paymentsCount": 1,
+      "amountCents": 0
+    },
+    "netCollectedCents": 19950
+  }
+}
+```
+
+---
+
+### Driver Earnings Ledger (Paginated)
+
+`GET /drivers/me/earnings?status=succeeded&limit=20&cursor=<paymentId>`
+
+Response:
+
+```json
+{
+  "payments": [
+    {
+      "id": "payment-uuid",
+      "paymentIntentId": "pi_...",
+      "amountCents": 2500,
+      "platformFeeCents": 375,
+      "driverEarningsCents": 2125,
+      "currency": "cad",
+      "status": "succeeded",
+      "createdAt": "2026-02-02T00:00:00.000Z",
+      "updatedAt": "2026-02-02T00:02:00.000Z",
+      "booking": {
+        "id": "booking-uuid",
+        "status": "CONFIRMED",
+        "paymentStatus": "paid",
+        "seatsBooked": 1,
+        "passenger": {
+          "id": "passenger-uuid",
+          "name": "Passenger Name",
+          "email": "passenger@example.com"
+        },
+        "ride": {
+          "id": "ride-uuid",
+          "fromCity": "Waterloo",
+          "toCity": "Toronto",
+          "startTime": "2026-02-05T14:00:00.000Z",
+          "status": "completed"
+        }
+      }
+    }
+  ],
+  "nextCursor": "payment-uuid"
+}
+```
+
+---
+
 ## 📌 Ride Requests
 
 Passengers create ride requests; drivers can browse pending requests and offer rides.

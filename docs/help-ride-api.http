@@ -458,6 +458,20 @@ Content-Type: application/json
 
 ###
 
+### DRIVER SUMMARY (RIDES + EARNINGS)
+GET {{baseUrl}}/drivers/me/summary
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
+### DRIVER EARNINGS LEDGER (PAGINATED)
+GET {{baseUrl}}/drivers/me/earnings?status=succeeded&limit=20
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
 ### GET DRIVER PROFILE (by userId)
 GET {{baseUrl}}/drivers/{{userId}}
 Accept: application/json
@@ -758,3 +772,8 @@ Accept: application/json
 
 ### STRIPE WEBHOOK (LOCAL DEV - RUN IN TERMINAL)
 # stripe listen --forward-to localhost:4000/api/webhooks/stripe
+
+# Card number: 4242 4242 4242 4242
+# Expiry: Any future date (e.g. 12/34)
+# CVC: Any 3 digits (e.g. 123)
+# ZIP / Postal: Any (e.g. A1A1A1 or 12345)
