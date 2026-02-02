@@ -2,7 +2,7 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { resolveSeatPrice } from "../lib/pricing.js"
+import { classifyRideTimingByDeparture, resolveSeatPrice } from "../lib/pricing.js"
 import { notifyUser, notifyUsersByRole } from "../lib/notifications.js"
 import { initiateBookingRefundIfPaid } from "../lib/refunds.js"
 
@@ -16,6 +16,13 @@ interface CreateRideBody {
   startTime: string // ISO string from client
   pricePerSeat: number
   seatsTotal: number
+}
+
+function attachRideTiming<T extends { startTime: Date }>(ride: T) {
+  return {
+    ...ride,
+    rideTiming: classifyRideTimingByDeparture(ride.startTime),
+  }
 }
 
 /**
@@ -109,7 +116,7 @@ export async function createRide(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.status(201).json(ride)
+    return res.status(201).json(attachRideTiming(ride))
   } catch (err) {
     console.error("POST /api/rides error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -288,7 +295,7 @@ export async function searchRides(req: AuthRequest, res: Response) {
       )
     }
 
-    return res.json(rides)
+    return res.json(rides.map(attachRideTiming))
   } catch (err) {
     console.error("GET /api/rides error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -349,7 +356,7 @@ export async function getMyRides(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.json(rides)
+    return res.json(rides.map(attachRideTiming))
   } catch (err) {
     console.error("GET /api/rides/mine error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -392,7 +399,7 @@ export async function getRideById(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: "Ride not found" })
     }
 
-    return res.json(ride)
+    return res.json(attachRideTiming(ride))
   } catch (err) {
     console.error("GET /api/rides/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -474,7 +481,7 @@ export async function updateRide(req: AuthRequest, res: Response) {
       data: updateData,
     })
 
-    return res.json(updatedRide)
+    return res.json(attachRideTiming(updatedRide))
   } catch (err) {
     console.error("PATCH /api/rides/:id error", err)
     return res.status(500).json({ error: "Internal server error" })

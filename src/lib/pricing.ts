@@ -11,7 +11,10 @@ type PricingInput = {
   basePricePerSeat: number
   departureTime: Date
   bookedAt?: Date
+  sameDestination?: boolean
 }
+
+export type RideTimingClassification = "PREBOOKED" | "ONTIME" | "STANDARD"
 
 function normalizeCity(value: string) {
   return value.trim().toLowerCase()
@@ -57,6 +60,27 @@ function roundToCents(value: number) {
   return Math.round(value * 100) / 100
 }
 
+function classifyRideTiming(hoursUntilDeparture: number): RideTimingClassification {
+  if (hoursUntilDeparture >= 10) {
+    return "PREBOOKED"
+  }
+
+  if (hoursUntilDeparture >= 0 && hoursUntilDeparture <= 2) {
+    return "ONTIME"
+  }
+
+  return "STANDARD"
+}
+
+export function classifyRideTimingByDeparture(
+  departureTime: Date,
+  referenceTime: Date = new Date()
+): RideTimingClassification {
+  const hoursUntilDeparture =
+    (departureTime.getTime() - referenceTime.getTime()) / (1000 * 60 * 60)
+  return classifyRideTiming(hoursUntilDeparture)
+}
+
 export async function resolveSeatPrice({
   fromCity,
   toCity,
@@ -68,16 +92,18 @@ export async function resolveSeatPrice({
   basePricePerSeat,
   departureTime,
   bookedAt,
+  sameDestination,
 }: PricingInput) {
   const distanceKm = haversineDistanceKm(fromLat, fromLng, toLat, toLng)
   const fixedRoutePrice = await getFixedRoutePrice(fromCity, toCity)
   let pricePerSeat = fixedRoutePrice ?? basePricePerSeat
 
   const bookingTime = bookedAt ?? new Date()
-  const hoursUntilDeparture =
-    (departureTime.getTime() - bookingTime.getTime()) / (1000 * 60 * 60)
+  const rideTiming = classifyRideTimingByDeparture(departureTime, bookingTime)
+  // Current ride model uses one route destination by default.
+  const isSameDestination = sameDestination ?? true
 
-  if (hoursUntilDeparture <= 2) {
+  if (rideTiming === "ONTIME") {
     pricePerSeat *= 1.3
   }
 
@@ -85,7 +111,7 @@ export async function resolveSeatPrice({
     pricePerSeat = 20
   }
 
-  if (distanceKm >= 50 && pricePerSeat > 15) {
+  if (isSameDestination && distanceKm >= 50 && pricePerSeat > 15) {
     pricePerSeat = 15
   }
 
@@ -97,5 +123,6 @@ export async function resolveSeatPrice({
   return {
     distanceKm,
     pricePerSeat: roundToCents(pricePerSeat),
+    rideTiming,
   }
 }

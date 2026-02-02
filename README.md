@@ -740,6 +740,15 @@ Passenger ↔ driver chat scoped to a ride, with realtime delivery via Pusher.
 `GET /api/chat/conversations/:id/messages?limit=50&cursor=<messageId>` (JWT)
 
 - Returns newest messages first, plus `nextCursor` for pagination.
+- Each message includes `readAt` (`null` until the recipient marks it read).
+
+### Mark Messages Read
+
+`POST /api/chat/conversations/:id/read` (JWT)
+
+- Marks unread incoming messages in the conversation as read.
+- Returns `readCount`, `readAt`, and `messageIds` for updated messages.
+- Broadcasts `message:read` on the conversation realtime channel.
 
 ### Send Message
 

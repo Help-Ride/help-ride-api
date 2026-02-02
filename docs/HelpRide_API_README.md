@@ -294,12 +294,16 @@ Response:
 The API resolves the final per-seat price on create/update using these rules:
 
 1. Fixed route price (if configured)
-2. ONTIME uplift (+30%) if booking is within 2 hours of departure
-3. Minimum price protection (distance ≥ 55 km, seats ≤ 2, price < $20 → $20)
-4. Same-drop ceiling (distance ≥ 50 km → price ≤ $15)
-5. Upper safety cap (price ≤ distance × $0.30)
+2. Ride timing classification based on departure lead time:
+   - `PREBOOKED`: ride created/updated at least 10 hours before departure
+   - `ONTIME`: ride created/updated within 2 hours of departure
+3. ONTIME uplift (+30%) if ride timing is `ONTIME`
+4. Minimum price protection (distance ≥ 55 km, seats ≤ 2, price < $20 → $20)
+5. Same-drop ceiling (same destination and distance ≥ 50 km → price ≤ $15)
+6. Upper safety cap (final price ≤ distance × $0.30)
 
 `pricePerSeat` in requests is treated as the base/desired value before rules apply.
+Ride responses include `rideTiming` (`PREBOOKED`, `ONTIME`, or `STANDARD`) for UI badges.
 
 ---
 
@@ -1836,6 +1840,7 @@ Response:
       "conversationId": "conversation-uuid",
       "senderId": "passenger-uuid",
       "body": "Hello!",
+      "readAt": null,
       "createdAt": "2025-01-01T02:00:00.000Z",
       "sender": {
         "id": "passenger-uuid",
@@ -1845,6 +1850,23 @@ Response:
     }
   ],
   "nextCursor": "message-uuid"
+}
+```
+
+---
+
+### Mark Messages Read
+
+`POST /chat/conversations/{conversationId}/read`
+
+Response:
+
+```json
+{
+  "conversationId": "conversation-uuid",
+  "readCount": 2,
+  "readAt": "2025-01-01T02:05:00.000Z",
+  "messageIds": ["message-uuid-1", "message-uuid-2"]
 }
 ```
 
@@ -1868,6 +1890,7 @@ Response:
   "conversationId": "conversation-uuid",
   "senderId": "passenger-uuid",
   "body": "Hello!",
+  "readAt": null,
   "createdAt": "2025-01-01T02:00:00.000Z",
   "sender": {
     "id": "passenger-uuid",

@@ -311,6 +311,7 @@ model Message {
   sender         User         @relation(fields: [senderId], references: [id])
   senderId       String
   body           String
+  readAt         DateTime?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])

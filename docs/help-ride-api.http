@@ -214,6 +214,7 @@ Content-Type: application/json
 ###
 
 ### SEARCH RIDES (PUBLIC)
+# Response includes `rideTiming`: PREBOOKED | ONTIME | STANDARD
 GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
 Accept: application/json
 
@@ -226,6 +227,7 @@ Accept: application/json
 ###
 
 ### GET MY RIDES  (driver only)
+# Response includes `rideTiming`: PREBOOKED | ONTIME | STANDARD
 GET {{baseUrl}}/rides/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -238,6 +240,7 @@ Accept: application/json
 
 
 ### GET RIDE BY ID
+# Response includes `rideTiming`: PREBOOKED | ONTIME | STANDARD
 GET {{baseUrl}}/rides/{{rideId}}
 Accept: application/json
 
@@ -443,6 +446,13 @@ Accept: application/json
 
 ### LIST MESSAGES
 GET {{baseUrl}}/chat/conversations/{{conversationId}}/messages?limit=50
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### MARK MESSAGES READ
+POST {{baseUrl}}/chat/conversations/{{conversationId}}/read
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
