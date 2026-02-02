@@ -4,6 +4,8 @@ import { authGuard } from "../middleware/auth.js"
 import { requireVerifiedEmail } from "../middleware/requireVerifiedEmail.js"
 import { rateLimit } from "../middleware/rateLimit.js"
 import {
+  acceptRideRequest,
+  cancelRideRequest,
   createRide,
   updateRide,
   listRideRequests,
@@ -27,6 +29,9 @@ router.get("/me/list", authGuard, getMyRideRequests)
 // Driver: my offers (auth)
 router.get("/offers/me/list", authGuard, listMyRideRequestOffers)
 
+// Realtime server-to-server callback (no JWT, shared secret only)
+router.post("/:id/accept", acceptRideRequest)
+
 // Public list/search
 router.get("/", rateLimit({ windowMs: 60_000, max: 60 }), listRideRequests)
 
@@ -37,6 +42,7 @@ router.put("/:id", authGuard, requireVerifiedEmail, updateRide)
 
 // Passenger: create request (must be verified)
 router.post("/", authGuard, requireVerifiedEmail, createRide)
+router.post("/:id/cancel", authGuard, requireVerifiedEmail, cancelRideRequest)
 
 // Driver: create offer for a request
 router.post("/:id/offers", authGuard, requireVerifiedEmail, createRideRequestOffer)

@@ -117,6 +117,7 @@ model User {
   notifications        Notification[]
   sosEvents            SosEvent[]
   rideRequests         RideRequest[]
+  acceptedRideRequests RideRequest[]     @relation("AcceptedRideRequestDriver")
   rideRequestOffers    RideRequestOffer[]
   driverDocuments      DriverDocument[]
   refreshTokens        RefreshToken[]
@@ -310,6 +311,11 @@ model Message {
 }
 
 enum RideRequestStatus {
+  PENDING
+  OFFERING
+  ACCEPTED
+  CANCELLED
+  EXPIRED
   pending
   matched
   cancelled
@@ -317,6 +323,10 @@ enum RideRequestStatus {
 }
 
 enum RideRequestOfferStatus {
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
   pending
   accepted
   rejected
@@ -327,6 +337,8 @@ model RideRequest {
   id             String            @id @default(uuid())
   passenger      User              @relation(fields: [passengerId], references: [id])
   passengerId    String
+  driver         User?             @relation("AcceptedRideRequestDriver", fields: [driverId], references: [id])
+  driverId       String?
 
   fromCity       String
   fromLat        Float
@@ -349,7 +361,7 @@ model RideRequest {
   returnDate     DateTime?
   returnTime     String?
 
-  status         RideRequestStatus @default(pending)
+  status         RideRequestStatus @default(PENDING)
 
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
@@ -361,6 +373,7 @@ model RideRequest {
   @@index([toCity])
   @@index([fromLat, fromLng])
   @@index([passengerId])
+  @@index([driverId])
 }
 
 model RideRequestOffer {
@@ -369,16 +382,16 @@ model RideRequestOffer {
   rideRequestId  String
   driver         User                    @relation(fields: [driverId], references: [id])
   driverId       String
-  ride           Ride                    @relation(fields: [rideId], references: [id])
-  rideId         String
+  ride           Ride?                   @relation(fields: [rideId], references: [id])
+  rideId         String?
   seatsOffered   Int
   pricePerSeat   Decimal                 @db.Decimal(10, 2)
-  status         RideRequestOfferStatus  @default(pending)
+  status         RideRequestOfferStatus  @default(SENT)
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
   @@index([rideRequestId])
   @@index([driverId])
   @@index([rideId])
-  @@unique([rideRequestId, driverId, rideId])
+  @@unique([rideRequestId, driverId])
 }

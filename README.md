@@ -101,6 +101,12 @@ PAYMENT_PLATFORM_FEE_PCT=0.15
 # Optional backward-compatible alias:
 # STRIPE_PLATFORM_FEE_PCT=0.15
 
+# Realtime dispatch bridge (Fly.io)
+REALTIME_BASE_URL="https://your-realtime-app.fly.dev"
+REALTIME_TO_API_SECRET="rts_xxx"
+# Must match realtime service JWT verification secret:
+# JWT_ACCESS_SECRET="same-value-used-by-realtime-service"
+
 # Optional pricing model overrides (cents / basis points)
 PAYMENT_BASE_FARE_CENTS=0
 PAYMENT_PER_KM_RATE_CENTS=0

@@ -1194,7 +1194,11 @@ Response:
 
 ## 📌 Ride Requests
 
-Passengers create ride requests; drivers can browse pending requests and offer rides.
+Passengers create ride requests; requests are dispatched to realtime matching and move to `OFFERING`.
+
+Status values:
+- RideRequest: `PENDING`, `OFFERING`, `ACCEPTED`, `CANCELLED`, `EXPIRED`
+- RideRequestOffer: `SENT`, `ACCEPTED`, `REJECTED`, `EXPIRED`
 
 ### Create Ride Request
 
@@ -1239,7 +1243,7 @@ Response:
   "tripType": "one-way",
   "returnDate": null,
   "returnTime": null,
-  "status": "pending",
+  "status": "OFFERING",
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z",
   "passenger": {
@@ -1361,7 +1365,7 @@ Response:
       "toCity": "Toronto",
       "preferredDate": "2025-12-20T08:00:00.000Z",
       "seatsNeeded": 1,
-      "status": "pending",
+      "status": "OFFERING",
       "passenger": {
         "id": "passenger-uuid",
         "name": "Passenger Name",
@@ -1397,7 +1401,7 @@ Response:
       "toCity": "Toronto",
       "preferredDate": "2025-12-20T08:00:00.000Z",
       "seatsNeeded": 1,
-      "status": "pending",
+      "status": "OFFERING",
       "passenger": {
         "id": "passenger-uuid",
         "name": "Passenger Name",
@@ -1426,7 +1430,7 @@ Response:
   "toCity": "Toronto",
   "preferredDate": "2025-12-20T08:00:00.000Z",
   "seatsNeeded": 1,
-  "status": "pending",
+  "status": "OFFERING",
   "passenger": {
     "id": "passenger-uuid",
     "name": "Passenger Name",
@@ -1458,7 +1462,7 @@ Response:
   "preferredTime": "09:30",
   "arrivalTime": "12:00",
   "seatsNeeded": 2,
-  "status": "pending",
+  "status": "OFFERING",
   "updatedAt": "2025-01-01T01:00:00.000Z",
   "passenger": {
     "id": "passenger-uuid",
@@ -1486,7 +1490,7 @@ Response:
     "toCity": "Toronto",
     "preferredDate": "2025-12-20T08:00:00.000Z",
     "seatsNeeded": 1,
-    "status": "pending",
+    "status": "OFFERING",
     "passenger": {
       "id": "passenger-uuid",
       "name": "Passenger Name",
@@ -1499,7 +1503,48 @@ Response:
 
 ---
 
-### Delete Ride Request
+### Cancel Ride Request
+
+`POST /ride-requests/{rideRequestId}/cancel`
+
+Response:
+
+```json
+{
+  "id": "ride-request-uuid",
+  "status": "CANCELLED",
+  "updatedAt": "2025-01-01T01:00:00.000Z"
+}
+```
+
+---
+
+### Realtime Accept Callback (Server-to-Server)
+
+`POST /ride-requests/{rideRequestId}/accept`
+
+Headers:
+- `X-REALTIME-SECRET: <REALTIME_TO_API_SECRET>`
+
+Body:
+
+```json
+{
+  "driverId": "driver-uuid",
+  "rideId": "ride-uuid",
+  "seatsOffered": 1,
+  "pricePerSeat": 22
+}
+```
+
+Notes:
+- This endpoint does **not** use JWT.
+- It is idempotent (duplicate callbacks return success).
+- First accepted callback wins.
+
+---
+
+### Delete Ride Request (Legacy Alias)
 
 `DELETE /ride-requests/{rideRequestId}`
 
@@ -1508,7 +1553,7 @@ Response:
 ```json
 {
   "id": "ride-request-uuid",
-  "status": "cancelled",
+  "status": "CANCELLED",
   "updatedAt": "2025-01-01T01:00:00.000Z"
 }
 ```
@@ -1536,7 +1581,7 @@ Response:
   "rideId": "ride-uuid",
   "seatsOffered": 1,
   "pricePerSeat": 22,
-  "status": "pending",
+  "status": "SENT",
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z"
 }
@@ -1559,7 +1604,7 @@ Response:
     "rideId": "ride-uuid",
     "seatsOffered": 1,
     "pricePerSeat": 22,
-    "status": "pending",
+    "status": "SENT",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "ride": {
       "id": "ride-uuid",
@@ -1594,7 +1639,7 @@ Response:
     "rideId": "ride-uuid",
     "seatsOffered": 1,
     "pricePerSeat": 22,
-    "status": "pending",
+    "status": "SENT",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "rideRequest": {
       "id": "ride-request-uuid",
@@ -1627,11 +1672,11 @@ Response:
 {
   "offer": {
     "id": "offer-uuid",
-    "status": "accepted"
+    "status": "ACCEPTED"
   },
   "rideRequest": {
     "id": "ride-request-uuid",
-    "status": "matched"
+    "status": "ACCEPTED"
   },
   "booking": {
     "id": "booking-uuid",
@@ -1679,7 +1724,7 @@ Response:
 ```json
 {
   "id": "offer-uuid",
-  "status": "rejected"
+  "status": "REJECTED"
 }
 ```
 
@@ -1694,7 +1739,7 @@ Response:
 ```json
 {
   "id": "offer-uuid",
-  "status": "cancelled"
+  "status": "EXPIRED"
 }
 ```
 
@@ -2074,6 +2119,9 @@ STRIPE_WEBHOOK_SECRET=...
 PAYMENT_PLATFORM_FEE_PCT=0.15
 # optional backward-compatible alias:
 # STRIPE_PLATFORM_FEE_PCT=0.15
+REALTIME_BASE_URL=https://your-realtime-app.fly.dev
+REALTIME_TO_API_SECRET=rts_xxx
+# JWT_ACCESS_SECRET must match your Fly.io realtime service
 ```
 
 ---

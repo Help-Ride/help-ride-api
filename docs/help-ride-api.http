@@ -16,6 +16,7 @@
 @email = patel.rishi3001@gmail.com
 @otp = 332576
 @resetOtp = 112233
+@realtimeSecret = replace-with-REALTIME_TO_API_SECRET
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -516,7 +517,7 @@ Content-Type: application/json
 
 ###
 
-### PUBLIC LIST RIDE REQUESTS (PENDING BY DEFAULT)
+### PUBLIC LIST RIDE REQUESTS (OFFERING/PENDING BY DEFAULT)
 GET {{baseUrl}}/ride-requests?fromCity=Waterloo&toCity=Toronto
 Accept: application/json
 
@@ -557,9 +558,29 @@ Content-Type: application/json
 
 ###
 
-### DELETE / CANCEL OWN RIDE REQUEST
+### CANCEL OWN RIDE REQUEST
+POST {{baseUrl}}/ride-requests/{{rideRequestId}}/cancel
+Authorization: Bearer {{accessToken}}
+
+###
+
+### DELETE / CANCEL OWN RIDE REQUEST (LEGACY ALIAS)
 DELETE {{baseUrl}}/ride-requests/{{rideRequestId}}
 Authorization: Bearer {{accessToken}}
+
+###
+
+### REALTIME ACCEPT CALLBACK (SERVER-TO-SERVER, NO JWT)
+POST {{baseUrl}}/ride-requests/{{rideRequestId}}/accept
+X-REALTIME-SECRET: {{realtimeSecret}}
+Content-Type: application/json
+
+{
+  "driverId": "{{userId}}",
+  "rideId": "{{rideId}}",
+  "seatsOffered": 1,
+  "pricePerSeat": 20
+}
 
 ###
 

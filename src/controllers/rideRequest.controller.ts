@@ -3,6 +3,11 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { notifyUsersByRole } from "../lib/notifications.js"
+import {
+  dispatchRideRequest,
+  dispatchRideRequestCancel,
+  getRealtimeToApiSecret,
+} from "../lib/realtime.js"
 
 interface CreateRideRequestBody {
   fromCity?: string
@@ -38,10 +43,26 @@ interface UpdateRideRequestBody {
   returnTime?: string | null
 }
 
+interface AcceptRideRequestBody {
+  driverId?: string
+  rideId?: string | null
+  seatsOffered?: number
+  pricePerSeat?: number
+}
+
 const DEFAULT_RADIUS_KM = 25
 const MAX_RADIUS_KM = 100
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
+
+const ACTIVE_REQUEST_STATUSES = new Set(["PENDING", "OFFERING", "pending"])
+const ACCEPTED_REQUEST_STATUSES = new Set(["ACCEPTED", "matched"])
+const TERMINAL_REQUEST_STATUSES = new Set([
+  "CANCELLED",
+  "EXPIRED",
+  "cancelled",
+  "expired",
+])
 
 function validateAndParsePreferredDate(preferredDate: string | undefined): {
   date: Date | undefined
@@ -177,6 +198,7 @@ export async function createRide(req: AuthRequest, res: Response) {
         tripType,
         returnDate: returnDateValue,
         returnTime: returnTime ?? null,
+        status: "PENDING",
       },
       include: {
         passenger: {
@@ -190,6 +212,39 @@ export async function createRide(req: AuthRequest, res: Response) {
       },
     })
 
+    const offeringRequest = await prisma.rideRequest.update({
+      where: { id: request.id },
+      data: { status: "OFFERING" },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+      },
+    })
+
+    try {
+      await dispatchRideRequest({
+        rideRequestId: request.id,
+        pickupLat: request.fromLat,
+        pickupLng: request.fromLng,
+      })
+      console.info(
+        "[realtime] dispatch request sent",
+        JSON.stringify({ rideRequestId: request.id })
+      )
+    } catch (dispatchErr) {
+      console.error(
+        "[realtime] dispatch request failed",
+        JSON.stringify({ rideRequestId: request.id }),
+        dispatchErr
+      )
+    }
+
     await notifyUsersByRole({
       role: "driver",
       excludeUserId: req.userId,
@@ -202,7 +257,7 @@ export async function createRide(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.status(201).json(request)
+    return res.status(201).json(offeringRequest)
   } catch (err) {
     console.error("POST /ride-requests error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -473,11 +528,23 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
     if (toCity) {
       where.toCity = { contains: toCity, mode: "insensitive" }
     }
-    const validStatuses = ["pending", "matched", "cancelled", "expired"]
+    const validStatuses = [
+      "PENDING",
+      "OFFERING",
+      "ACCEPTED",
+      "CANCELLED",
+      "EXPIRED",
+      "pending",
+      "matched",
+      "cancelled",
+      "expired",
+    ]
     if (status && validStatuses.includes(status)) {
       where.status = status
     } else {
-      where.status = "pending"
+      where.status = {
+        in: ["OFFERING", "PENDING", "pending"],
+      }
     }
 
     const hasPickupCoords = pickupLat != null && pickupLng != null
@@ -727,6 +794,14 @@ export async function getRideRequestById(req: AuthRequest, res: Response) {
  * Passenger cancels their own request
  */
 export async function deleteRideRequest(req: AuthRequest, res: Response) {
+  return cancelRideRequest(req, res)
+}
+
+/**
+ * POST /api/ride-requests/:id/cancel
+ * Passenger cancels their own request.
+ */
+export async function cancelRideRequest(req: AuthRequest, res: Response) {
   try {
     if (!req.userId) {
       return res.status(401).json({ error: "Unauthorized" })
@@ -751,20 +826,193 @@ export async function deleteRideRequest(req: AuthRequest, res: Response) {
       })
     }
 
-    if (existing.status !== "pending") {
+    if (existing.status === "CANCELLED" || existing.status === "cancelled") {
+      return res.status(200).json(existing)
+    }
+
+    if (TERMINAL_REQUEST_STATUSES.has(existing.status)) {
       return res.status(400).json({
-        error: "Only pending ride requests can be deleted",
+        error: "Ride request is already closed",
+      })
+    }
+
+    if (!ACTIVE_REQUEST_STATUSES.has(existing.status)) {
+      return res.status(400).json({
+        error: "Only active ride requests can be cancelled",
       })
     }
 
     const updated = await prisma.rideRequest.update({
       where: { id },
-      data: { status: "cancelled" },
+      data: { status: "CANCELLED" },
     })
+
+    try {
+      await dispatchRideRequestCancel({ rideRequestId: existing.id })
+      console.info(
+        "[realtime] cancel callback triggered",
+        JSON.stringify({ rideRequestId: existing.id })
+      )
+    } catch (cancelErr) {
+      console.error(
+        "[realtime] cancel dispatch failed",
+        JSON.stringify({ rideRequestId: existing.id }),
+        cancelErr
+      )
+    }
 
     return res.status(200).json(updated)
   } catch (err) {
-    console.error("DELETE /ride-requests/:id error", err)
+    console.error("POST /ride-requests/:id/cancel error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/ride-requests/:id/accept
+ * Secure server-to-server callback from realtime dispatcher.
+ */
+export async function acceptRideRequest(req: AuthRequest, res: Response) {
+  try {
+    const headerSecret = req.header("X-REALTIME-SECRET")
+    const expectedSecret = getRealtimeToApiSecret()
+
+    if (!headerSecret || headerSecret !== expectedSecret) {
+      return res.status(403).json({ error: "Forbidden" })
+    }
+
+    const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: "id is required" })
+    }
+
+    const { driverId, rideId, seatsOffered, pricePerSeat } =
+      (req.body ?? {}) as AcceptRideRequestBody
+
+    console.info(
+      "[realtime] accept callback received",
+      JSON.stringify({ rideRequestId: id })
+    )
+
+    if (!driverId) {
+      return res.status(400).json({ error: "driverId is required" })
+    }
+
+    const rideRequest = await prisma.rideRequest.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        driverId: true,
+        seatsNeeded: true,
+      },
+    })
+
+    if (!rideRequest) {
+      return res.status(404).json({ error: "Ride request not found" })
+    }
+
+    if (ACCEPTED_REQUEST_STATUSES.has(rideRequest.status)) {
+      return res.status(200).json({
+        ok: true,
+        idempotent: true,
+        rideRequestId: rideRequest.id,
+        status: "ACCEPTED",
+        driverId: rideRequest.driverId,
+      })
+    }
+
+    if (TERMINAL_REQUEST_STATUSES.has(rideRequest.status)) {
+      return res.status(409).json({
+        error: "Ride request is closed",
+        status: rideRequest.status,
+      })
+    }
+
+    if (!ACTIVE_REQUEST_STATUSES.has(rideRequest.status)) {
+      return res.status(409).json({
+        error: "Ride request is not in an acceptable state",
+        status: rideRequest.status,
+      })
+    }
+
+    if (rideId) {
+      const ride = await prisma.ride.findUnique({
+        where: { id: rideId },
+        select: { id: true, driverId: true },
+      })
+
+      if (!ride || ride.driverId !== driverId) {
+        return res.status(400).json({
+          error: "rideId is invalid for the provided driverId",
+        })
+      }
+    }
+
+    const resolvedSeatsOffered =
+      seatsOffered != null ? Number(seatsOffered) : rideRequest.seatsNeeded
+    if (!Number.isFinite(resolvedSeatsOffered) || resolvedSeatsOffered <= 0) {
+      return res
+        .status(400)
+        .json({ error: "seatsOffered must be a positive number" })
+    }
+
+    const resolvedPricePerSeat =
+      pricePerSeat != null ? Number(pricePerSeat) : 0
+    if (!Number.isFinite(resolvedPricePerSeat) || resolvedPricePerSeat < 0) {
+      return res
+        .status(400)
+        .json({ error: "pricePerSeat must be a non-negative number" })
+    }
+
+    const [updatedRideRequest, acceptedOffer] = await prisma.$transaction([
+      prisma.rideRequest.update({
+        where: { id: rideRequest.id },
+        data: {
+          status: "ACCEPTED",
+          driverId,
+        },
+      }),
+      prisma.rideRequestOffer.upsert({
+        where: {
+          rideRequestId_driverId: {
+            rideRequestId: rideRequest.id,
+            driverId,
+          },
+        },
+        create: {
+          rideRequestId: rideRequest.id,
+          driverId,
+          rideId: rideId ?? null,
+          seatsOffered: resolvedSeatsOffered,
+          pricePerSeat: resolvedPricePerSeat,
+          status: "ACCEPTED",
+        },
+        update: {
+          rideId: rideId ?? null,
+          seatsOffered: resolvedSeatsOffered,
+          pricePerSeat: resolvedPricePerSeat,
+          status: "ACCEPTED",
+        },
+      }),
+      prisma.rideRequestOffer.updateMany({
+        where: {
+          rideRequestId: rideRequest.id,
+          driverId: { not: driverId },
+          status: { in: ["SENT", "pending"] },
+        },
+        data: { status: "REJECTED" },
+      }),
+    ])
+
+    return res.status(200).json({
+      ok: true,
+      idempotent: false,
+      rideRequest: updatedRideRequest,
+      offer: acceptedOffer,
+    })
+  } catch (err) {
+    console.error("POST /ride-requests/:id/accept error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

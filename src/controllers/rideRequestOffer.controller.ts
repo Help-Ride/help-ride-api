@@ -9,6 +9,15 @@ interface CreateOfferBody {
   seatsOffered?: number
 }
 
+const OPEN_REQUEST_STATUSES = new Set(["PENDING", "OFFERING", "pending"])
+const OPEN_OFFER_STATUSES = new Set(["SENT", "pending"])
+const REOPENABLE_OFFER_STATUSES = new Set([
+  "REJECTED",
+  "EXPIRED",
+  "rejected",
+  "cancelled",
+])
+
 /**
  * POST /api/ride-requests/:id/offers
  * Driver creates an offer for a passenger ride request
@@ -37,7 +46,7 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: "Ride request not found" })
     }
 
-    if (rideRequest.status !== "pending") {
+    if (!OPEN_REQUEST_STATUSES.has(rideRequest.status)) {
       return res.status(400).json({ error: "Ride request is not pending" })
     }
 
@@ -83,20 +92,20 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
 
     const existingOffer = await prisma.rideRequestOffer.findUnique({
       where: {
-        rideRequestId_driverId_rideId: {
+        rideRequestId_driverId: {
           rideRequestId: rideRequest.id,
           driverId: ride.driverId,
-          rideId: ride.id,
         },
       },
     })
 
     if (existingOffer) {
-      if (["rejected", "cancelled"].includes(existingOffer.status)) {
+      if (REOPENABLE_OFFER_STATUSES.has(existingOffer.status)) {
         const updatedOffer = await prisma.rideRequestOffer.update({
           where: { id: existingOffer.id },
           data: {
-            status: "pending",
+            status: "SENT",
+            rideId: ride.id,
             seatsOffered: seats,
             pricePerSeat: ride.pricePerSeat,
           },
@@ -131,6 +140,7 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
         rideId: ride.id,
         seatsOffered: seats,
         pricePerSeat: ride.pricePerSeat,
+        status: "SENT",
       },
     })
 
@@ -297,14 +307,18 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
         .json({ error: "You can only accept offers for your request" })
     }
 
-    if (offer.status !== "pending") {
+    if (!OPEN_OFFER_STATUSES.has(offer.status)) {
       return res
         .status(400)
         .json({ error: "Only pending offers can be accepted" })
     }
 
-    if (offer.rideRequest.status !== "pending") {
+    if (!OPEN_REQUEST_STATUSES.has(offer.rideRequest.status)) {
       return res.status(400).json({ error: "Ride request is not pending" })
+    }
+
+    if (!offer.ride) {
+      return res.status(400).json({ error: "Offer is missing linked ride" })
     }
 
     if (offer.ride.status !== "open") {
@@ -324,15 +338,18 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
     ] = await prisma.$transaction([
       prisma.rideRequestOffer.update({
         where: { id: offer.id },
-        data: { status: "accepted" },
+        data: { status: "ACCEPTED" },
       }),
       prisma.rideRequest.update({
         where: { id: offer.rideRequestId },
-        data: { status: "matched" },
+        data: {
+          status: "ACCEPTED",
+          driverId: offer.driverId,
+        },
       }),
       prisma.booking.create({
         data: {
-          rideId: offer.rideId,
+          rideId: offer.ride.id,
           passengerId: offer.rideRequest.passengerId,
           seatsBooked: offer.seatsOffered,
           status: "ACCEPTED",
@@ -367,7 +384,7 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
         },
       }),
       prisma.ride.update({
-        where: { id: offer.rideId },
+        where: { id: offer.ride.id },
         data: {
           seatsAvailable: offer.ride.seatsAvailable - offer.seatsOffered,
           status:
@@ -379,10 +396,10 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       prisma.rideRequestOffer.updateMany({
         where: {
           rideRequestId: offer.rideRequestId,
-          status: "pending",
+          status: { in: ["SENT", "pending"] },
           NOT: { id: offer.id },
         },
-        data: { status: "rejected" },
+        data: { status: "REJECTED" },
       }),
     ])
 
@@ -394,7 +411,7 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       data: {
         offerId: offer.id,
         rideRequestId: offer.rideRequestId,
-        rideId: offer.rideId,
+        rideId: offer.ride.id,
         bookingId: booking.id,
         kind: "ride_request_offer_accepted",
       },
@@ -444,7 +461,7 @@ export async function rejectRideRequestOffer(req: AuthRequest, res: Response) {
         .json({ error: "You can only reject offers for your request" })
     }
 
-    if (offer.status !== "pending") {
+    if (!OPEN_OFFER_STATUSES.has(offer.status)) {
       return res
         .status(400)
         .json({ error: "Only pending offers can be rejected" })
@@ -452,7 +469,7 @@ export async function rejectRideRequestOffer(req: AuthRequest, res: Response) {
 
     const updated = await prisma.rideRequestOffer.update({
       where: { id: offer.id },
-      data: { status: "rejected" },
+      data: { status: "REJECTED" },
     })
 
     await notifyUser({
@@ -463,7 +480,7 @@ export async function rejectRideRequestOffer(req: AuthRequest, res: Response) {
       data: {
         offerId: offer.id,
         rideRequestId: offer.rideRequestId,
-        rideId: offer.rideId,
+        rideId: offer.rideId ?? "",
         kind: "ride_request_offer_rejected",
       },
     })
@@ -507,7 +524,7 @@ export async function cancelRideRequestOffer(req: AuthRequest, res: Response) {
         .json({ error: "You can only cancel your own offers" })
     }
 
-    if (offer.status !== "pending") {
+    if (!OPEN_OFFER_STATUSES.has(offer.status)) {
       return res
         .status(400)
         .json({ error: "Only pending offers can be cancelled" })
@@ -515,18 +532,22 @@ export async function cancelRideRequestOffer(req: AuthRequest, res: Response) {
 
     const updated = await prisma.rideRequestOffer.update({
       where: { id: offer.id },
-      data: { status: "cancelled" },
+      data: { status: "EXPIRED" },
     })
+
+    const routeLabel = offer.ride
+      ? `${offer.ride.fromCity} → ${offer.ride.toCity}`
+      : "Ride offer"
 
     await notifyUser({
       userId: offer.rideRequest.passengerId,
       title: "Offer cancelled",
-      body: `${offer.ride.fromCity} → ${offer.ride.toCity} offer was cancelled`,
+      body: `${routeLabel} offer was cancelled`,
       type: "ride_update",
       data: {
         offerId: offer.id,
         rideRequestId: offer.rideRequestId,
-        rideId: offer.rideId,
+        rideId: offer.rideId ?? "",
         kind: "ride_request_offer_cancelled",
       },
     })
