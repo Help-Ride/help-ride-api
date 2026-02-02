@@ -958,14 +958,41 @@ Response:
 
 ```json
 {
-  "clientSecret": "pi_..._secret_..."
+  "clientSecret": "pi_..._secret_...",
+  "paymentIntentId": "pi_...",
+  "amount": 2200,
+  "currency": "cad"
 }
 ```
 
 Notes:
 - Booking must be `ACCEPTED`.
-- Amount is computed server-side from ride coordinates + seat pricing.
-- Booking transitions to `PAYMENT_PENDING` after intent creation.
+- Amount is computed server-side (distance/seat-based pricing model) and never accepted from client input.
+- If a booking already has a `stripePaymentIntentId`, the existing intent is reused (idempotency).
+- Booking transitions to `PAYMENT_PENDING` after intent creation/reuse.
+
+---
+
+### Get PaymentIntent (Debug / Status)
+
+`GET /payments/intent/:id`
+
+Response:
+
+```json
+{
+  "paymentIntentId": "pi_...",
+  "clientSecret": "pi_..._secret_...",
+  "amount": 2200,
+  "currency": "cad",
+  "stripeStatus": "requires_payment_method",
+  "localStatus": "pending",
+  "bookingId": "booking-uuid",
+  "bookingStatus": "PAYMENT_PENDING",
+  "bookingPaymentStatus": "pending",
+  "rideId": "ride-uuid"
+}
+```
 
 ---
 
@@ -975,11 +1002,18 @@ Notes:
 
 Stripe dashboard configuration:
 - Endpoint URL: `/api/webhooks/stripe`
-- Events: `payment_intent.succeeded`, `payment_intent.payment_failed`
+- Events: `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`
+
+Local forwarding:
+
+```bash
+stripe listen --forward-to localhost:4000/api/webhooks/stripe
+```
 
 Listen for:
-- `payment_intent.succeeded` → booking `CONFIRMED`
-- `payment_intent.payment_failed` → booking `ACCEPTED`
+- `payment_intent.succeeded` → booking `CONFIRMED` + payment status `paid`
+- `payment_intent.payment_failed` → booking `ACCEPTED` + payment status `failed`
+- `charge.refunded` → payment status `refunded`
 
 ---
 

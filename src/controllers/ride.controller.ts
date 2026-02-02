@@ -512,6 +512,28 @@ export async function deleteRide(req: AuthRequest, res: Response) {
   }
 }
 
+async function getUnpaidBlockingBookings(rideId: string) {
+  const bookings = await prisma.booking.findMany({
+    where: {
+      rideId,
+      status: { in: ["ACCEPTED", "PAYMENT_PENDING", "CONFIRMED", "confirmed"] },
+    },
+    select: {
+      id: true,
+      status: true,
+      paymentStatus: true,
+    },
+  })
+
+  return bookings.filter((booking) => {
+    if (booking.status === "ACCEPTED" || booking.status === "PAYMENT_PENDING") {
+      return true
+    }
+
+    return !["paid", "succeeded"].includes(booking.paymentStatus)
+  })
+}
+
 /**
  * POST /api/rides/:id/start
  * Driver starts ride
@@ -538,6 +560,14 @@ export async function startRide(req: AuthRequest, res: Response) {
 
     if (ride.status !== "open") {
       return res.status(400).json({ error: "Only open rides can be started" })
+    }
+
+    const unpaidBookings = await getUnpaidBlockingBookings(id)
+    if (unpaidBookings.length > 0) {
+      return res.status(400).json({
+        error: "Cannot start ride until all accepted bookings are paid",
+        unpaidBookingIds: unpaidBookings.map((booking) => booking.id),
+      })
     }
 
     const bookings = await prisma.booking.findMany({
@@ -601,6 +631,14 @@ export async function completeRide(req: AuthRequest, res: Response) {
       return res
         .status(400)
         .json({ error: "Only ongoing rides can be completed" })
+    }
+
+    const unpaidBookings = await getUnpaidBlockingBookings(id)
+    if (unpaidBookings.length > 0) {
+      return res.status(400).json({
+        error: "Cannot complete ride until all accepted bookings are paid",
+        unpaidBookingIds: unpaidBookings.map((booking) => booking.id),
+      })
     }
 
     const bookings = await prisma.booking.findMany({

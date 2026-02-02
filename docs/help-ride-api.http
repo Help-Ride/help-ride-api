@@ -755,3 +755,16 @@ Content-Type: application/json
 }
 
 ###
+
+# Set from payment intent response
+@paymentIntentId =
+
+### GET PAYMENT INTENT STATUS (Passenger/Driver)
+GET {{baseUrl}}/payments/intent/{{paymentIntentId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### STRIPE WEBHOOK (LOCAL DEV - RUN IN TERMINAL)
+# stripe listen --forward-to localhost:4000/api/webhooks/stripe

@@ -101,6 +101,12 @@ STRIPE_PLATFORM_FEE_PCT=0.15
 STRIPE_CONNECT_RETURN_URL="https://your-app.com/stripe/return"  # optional fallback
 STRIPE_CONNECT_REFRESH_URL="https://your-app.com/stripe/refresh" # optional fallback
 
+# Optional pricing model overrides (cents / basis points)
+PAYMENT_BASE_FARE_CENTS=0
+PAYMENT_PER_KM_RATE_CENTS=0
+PAYMENT_SERVICE_FEE_CENTS=0
+PAYMENT_TAX_BPS=0
+
 # App
 NODE_ENV="development"        # or "production"
 PORT=4000                     # local dev port
