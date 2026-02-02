@@ -97,9 +97,9 @@ PUSHER_CLUSTER="your-cluster"
 # Stripe
 STRIPE_SECRET_KEY="sk_test_..."
 STRIPE_WEBHOOK_SECRET="whsec_..."
-STRIPE_PLATFORM_FEE_PCT=0.15
-STRIPE_CONNECT_RETURN_URL="https://your-app.com/stripe/return"  # optional fallback
-STRIPE_CONNECT_REFRESH_URL="https://your-app.com/stripe/refresh" # optional fallback
+PAYMENT_PLATFORM_FEE_PCT=0.15
+# Optional backward-compatible alias:
+# STRIPE_PLATFORM_FEE_PCT=0.15
 
 # Optional pricing model overrides (cents / basis points)
 PAYMENT_BASE_FARE_CENTS=0

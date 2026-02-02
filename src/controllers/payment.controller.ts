@@ -3,7 +3,7 @@ import Stripe from "stripe"
 import prisma from "../lib/prisma.js"
 import type { AuthRequest } from "../middleware/auth.js"
 import { calculateBookingFareCents } from "../lib/payments.js"
-import { getStripePlatformFeePct, stripe } from "../lib/stripe.js"
+import { getPlatformFeePct, stripe } from "../lib/stripe.js"
 
 interface CreatePaymentIntentBody {
   bookingId?: string
@@ -105,7 +105,6 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
             driver: {
               select: {
                 id: true,
-                stripeAccountId: true,
               },
             },
           },
@@ -136,13 +135,6 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       })
     }
 
-    const driverStripeAccountId = booking.ride.driver.stripeAccountId
-    if (!driverStripeAccountId) {
-      return res.status(400).json({
-        error: "Driver has not completed Stripe onboarding",
-      })
-    }
-
     const pricePerSeat = Number(booking.ride.pricePerSeat)
     if (!Number.isFinite(pricePerSeat)) {
       return res.status(400).json({ error: "Invalid ride pricing" })
@@ -161,8 +153,9 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid fare amount" })
     }
 
-    const platformFeePct = getStripePlatformFeePct()
+    const platformFeePct = getPlatformFeePct()
     const platformFeeCents = Math.round(fareCents * platformFeePct)
+    const driverEarningsCents = fareCents - platformFeeCents
 
     if (platformFeeCents < 0 || platformFeeCents > fareCents) {
       return res.status(400).json({ error: "Invalid platform fee" })
@@ -175,12 +168,17 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
         )
 
         if (existingIntent.status !== "canceled") {
+          const existingAmountCents = existingIntent.amount ?? fareCents
+          const existingPlatformFeeCents = Math.round(
+            existingAmountCents * platformFeePct
+          )
+
           await prisma.$transaction([
             upsertPaymentRecordFromIntent({
               bookingId: booking.id,
               paymentIntent: existingIntent,
               fallbackAmountCents: fareCents,
-              platformFeeCents,
+              platformFeeCents: existingPlatformFeeCents,
             }),
             ...(existingIntent.status === "succeeded"
               ? []
@@ -208,8 +206,10 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
           return res.json({
             clientSecret: existingIntent.client_secret,
             paymentIntentId: existingIntent.id,
-            amount: existingIntent.amount ?? fareCents,
+            amount: existingAmountCents,
             currency: existingIntent.currency ?? CURRENCY,
+            helpRideFeeCents: existingPlatformFeeCents,
+            driverEarningsCents: existingAmountCents - existingPlatformFeeCents,
           })
         }
       } catch (err) {
@@ -228,10 +228,6 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       amount: fareCents,
       currency: CURRENCY,
       automatic_payment_methods: { enabled: true },
-      application_fee_amount: platformFeeCents,
-      transfer_data: {
-        destination: driverStripeAccountId,
-      },
       metadata: {
         bookingId: booking.id,
         passengerId: booking.passengerId,
@@ -242,6 +238,8 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
         distanceCents: String(breakdown.distanceCents),
         serviceFeeCents: String(breakdown.serviceFeeCents),
         taxCents: String(breakdown.taxCents),
+        helpRideFeeCents: String(platformFeeCents),
+        driverEarningsCents: String(driverEarningsCents),
       },
     }, {
       idempotencyKey: `booking:${booking.id}:intent`,
@@ -282,6 +280,8 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       paymentIntentId: paymentIntent.id,
       amount: paymentIntent.amount,
       currency: paymentIntent.currency,
+      helpRideFeeCents: platformFeeCents,
+      driverEarningsCents,
     })
   } catch (err) {
     console.error("POST /payments/intent error", err)
@@ -310,6 +310,7 @@ export async function getPaymentIntentById(req: AuthRequest, res: Response) {
       select: {
         paymentIntentId: true,
         amountCents: true,
+        platformFeeCents: true,
         currency: true,
         status: true,
         booking: {
@@ -348,6 +349,8 @@ export async function getPaymentIntentById(req: AuthRequest, res: Response) {
       currency: paymentIntent.currency ?? payment.currency,
       stripeStatus: paymentIntent.status,
       localStatus: payment.status,
+      helpRideFeeCents: payment.platformFeeCents,
+      driverEarningsCents: payment.amountCents - payment.platformFeeCents,
       bookingId: payment.booking.id,
       bookingStatus: payment.booking.status,
       bookingPaymentStatus: payment.booking.paymentStatus,

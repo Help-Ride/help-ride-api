@@ -18,15 +18,19 @@ export function getStripeWebhookSecret() {
   return secret
 }
 
-export function getStripePlatformFeePct() {
-  const raw = process.env.STRIPE_PLATFORM_FEE_PCT
+export function getPlatformFeePct() {
+  const raw =
+    process.env.PAYMENT_PLATFORM_FEE_PCT ?? process.env.STRIPE_PLATFORM_FEE_PCT
+
   if (!raw) {
-    throw new Error("STRIPE_PLATFORM_FEE_PCT is not set")
+    return 0
   }
 
   const pct = Number(raw)
   if (!Number.isFinite(pct) || pct < 0 || pct > 1) {
-    throw new Error("STRIPE_PLATFORM_FEE_PCT must be a number between 0 and 1")
+    throw new Error(
+      "PAYMENT_PLATFORM_FEE_PCT must be a number between 0 and 1"
+    )
   }
 
   return pct

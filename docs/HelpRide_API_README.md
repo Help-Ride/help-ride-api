@@ -921,28 +921,10 @@ Response:
 
 ## 💳 Stripe Payments
 
-### Driver Onboarding (Connect Express)
-
-`POST /stripe/connect/onboard`
-
-Body (optional fallback URLs can also be set via env):
-
-```json
-{
-  "returnUrl": "https://your-app.com/stripe/return",
-  "refreshUrl": "https://your-app.com/stripe/refresh"
-}
-```
-
-Response:
-
-```json
-{
-  "url": "https://connect.stripe.com/setup/s/..."
-}
-```
-
----
+Phase 1 uses platform-only collection:
+- Passenger card payments go to the HelpRide Stripe account.
+- Driver payouts are tracked internally and settled manually (e-Transfer/cash/off-platform).
+- Stripe Connect onboarding is disabled.
 
 ### Create PaymentIntent (Passenger)
 
@@ -961,7 +943,9 @@ Response:
   "clientSecret": "pi_..._secret_...",
   "paymentIntentId": "pi_...",
   "amount": 2200,
-  "currency": "cad"
+  "currency": "cad",
+  "helpRideFeeCents": 330,
+  "driverEarningsCents": 1870
 }
 ```
 
@@ -970,6 +954,7 @@ Notes:
 - Amount is computed server-side (distance/seat-based pricing model) and never accepted from client input.
 - If a booking already has a `stripePaymentIntentId`, the existing intent is reused (idempotency).
 - Booking transitions to `PAYMENT_PENDING` after intent creation/reuse.
+- Funds are collected into the HelpRide Stripe account (no direct transfer to driver).
 
 ---
 
@@ -987,6 +972,8 @@ Response:
   "currency": "cad",
   "stripeStatus": "requires_payment_method",
   "localStatus": "pending",
+  "helpRideFeeCents": 330,
+  "driverEarningsCents": 1870,
   "bookingId": "booking-uuid",
   "bookingStatus": "PAYMENT_PENDING",
   "bookingPaymentStatus": "pending",
@@ -2003,9 +1990,9 @@ FIREBASE_CLIENT_EMAIL=...
 FIREBASE_PRIVATE_KEY=...
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
-STRIPE_PLATFORM_FEE_PCT=0.15
-STRIPE_CONNECT_RETURN_URL=... # optional fallback
-STRIPE_CONNECT_REFRESH_URL=... # optional fallback
+PAYMENT_PLATFORM_FEE_PCT=0.15
+# optional backward-compatible alias:
+# STRIPE_PLATFORM_FEE_PCT=0.15
 ```
 
 ---

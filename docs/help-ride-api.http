@@ -730,20 +730,10 @@ DELETE {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
 Authorization: Bearer {{accessToken}}
 
 ################################################
-### 💳 STRIPE CONNECT + PAYMENTS
+### 💳 STRIPE PAYMENTS (PHASE 1: PLATFORM COLLECTION)
 ################################################
-
-### DRIVER ONBOARD STRIPE (Connect Express)
-POST {{baseUrl}}/stripe/connect/onboard
-Authorization: Bearer {{driverAccessToken}}
-Content-Type: application/json
-
-{
-  "returnUrl": "https://your-app.com/stripe/return",
-  "refreshUrl": "https://your-app.com/stripe/refresh"
-}
-
-###
+# Passenger funds go to HelpRide Stripe account.
+# Driver payouts are tracked in DB and settled manually.
 
 ### CREATE PAYMENT INTENT (Passenger)
 POST {{baseUrl}}/payments/intent
