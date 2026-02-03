@@ -1,7 +1,11 @@
 type DispatchPayload = {
   rideRequestId: string
+  pickupName?: string
   pickupLat: number
   pickupLng: number
+  dropoffName?: string
+  dropoffLat?: number
+  dropoffLng?: number
 }
 
 type CancelDispatchPayload = {

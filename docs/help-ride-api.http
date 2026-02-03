@@ -13,6 +13,7 @@
 @notificationId =
 @deviceToken =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
+@driverId = 3a81a31f-9d7d-48ed-b512-b16a7b663025
 @email = patel.rishi3001@gmail.com
 @otp = 332576
 @resetOtp = 112233
@@ -540,7 +541,29 @@ Content-Type: application/json
 ### 📌 RIDE REQUESTS (WHEN NO MATCHING RIDES)
 ################################################
 
+### CREATE JIT PAYMENT INTENT (PASSENGER, <= 2 HOURS TO DEPARTURE)
+POST {{baseUrl}}/ride-requests/jit/intent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "preferredDate": "2026-02-02T18:00:00.000Z",
+  "preferredTime": "18:00",
+  "seatsNeeded": 1,
+  "rideType": "one-time",
+  "tripType": "one-way"
+}
+
+###
+
 ### CREATE RIDE REQUEST (PASSENGER, VERIFIED)
+# NOTE: For departures within 2 hours, call /ride-requests/jit/intent first.
 POST {{baseUrl}}/ride-requests
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -621,7 +644,7 @@ X-REALTIME-SECRET: {{realtimeSecret}}
 Content-Type: application/json
 
 {
-  "driverId": "{{userId}}",
+  "driverId": "{{driverId}}",
   "rideId": "{{rideId}}",
   "seatsOffered": 1,
   "pricePerSeat": 20

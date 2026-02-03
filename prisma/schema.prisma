@@ -75,6 +75,11 @@ enum DriverDocumentStatus {
   rejected
 }
 
+enum RideRequestMode {
+  OFFER
+  JIT
+}
+
 model DriverDocument {
   id        String               @id @default(uuid())
   user      User                 @relation(fields: [userId], references: [id])
@@ -346,6 +351,11 @@ model RideRequest {
   passengerId    String
   driver         User?             @relation("AcceptedRideRequestDriver", fields: [driverId], references: [id])
   driverId       String?
+  mode           RideRequestMode   @default(OFFER)
+  jitPaymentIntentId String?       @unique
+  jitAmountCents Int?
+  jitCurrency    String?
+  quotedPricePerSeat Decimal?      @db.Decimal(10, 2)
 
   fromCity       String
   fromLat        Float

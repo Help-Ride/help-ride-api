@@ -588,6 +588,14 @@ Single-car model for now (one `DriverProfile` per `User`).
 
 Used when no matching ride exists and passengers want to post what they need.
 
+### Create JIT Payment Intent
+
+`POST /api/ride-requests/jit/intent` (JWT passenger, emailVerified)
+
+- For departure times within 2 hours.
+- Creates a payment intent first.
+- On successful Stripe webhook, the API creates a `RideRequest` with `mode = "JIT"` and dispatches it to realtime matching.
+
 ### Create Ride Request
 
 `POST /api/ride-requests` (JWT passenger, emailVerified)
@@ -611,7 +619,8 @@ Used when no matching ride exists and passengers want to post what they need.
 
 - Validates required fields and ISO dates.
 - For `tripType = "round-trip"`, ensures `returnDate >= preferredDate`.
-- Creates a `RideRequest` with `status = "pending"`.
+- For departures within 2 hours, returns an error and asks you to use `/api/ride-requests/jit/intent`.
+- Creates a regular `RideRequest` with `mode = "OFFER"` and `status = "pending"`.
 
 ### Search Ride Requests (Public)
 

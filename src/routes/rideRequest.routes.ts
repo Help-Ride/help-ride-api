@@ -7,6 +7,7 @@ import {
   acceptRideRequest,
   cancelRideRequest,
   createRide,
+  createJitRideRequestPaymentIntent,
   updateRide,
   listRideRequests,
   getMyRideRequests,
@@ -41,6 +42,12 @@ router.get("/:id", getRideRequestById)
 router.put("/:id", authGuard, requireVerifiedEmail, updateRide)
 
 // Passenger: create request (must be verified)
+router.post(
+  "/jit/intent",
+  authGuard,
+  requireVerifiedEmail,
+  createJitRideRequestPaymentIntent
+)
 router.post("/", authGuard, requireVerifiedEmail, createRide)
 router.post("/:id/cancel", authGuard, requireVerifiedEmail, cancelRideRequest)
 

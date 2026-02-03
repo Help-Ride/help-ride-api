@@ -3,6 +3,8 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { notifyUsersByRole } from "../lib/notifications.js"
+import { resolveSeatPrice } from "../lib/pricing.js"
+import { getPlatformFeePct, stripe } from "../lib/stripe.js"
 import {
   dispatchRideRequest,
   dispatchRideRequestCancel,
@@ -24,6 +26,10 @@ interface CreateRideRequestBody {
   tripType?: string
   returnDate?: string // ISO (optional)
   returnTime?: string
+}
+
+interface CreateJitRideRequestIntentBody extends CreateRideRequestBody {
+  basePricePerSeat?: number
 }
 
 interface UpdateRideRequestBody {
@@ -54,6 +60,8 @@ const DEFAULT_RADIUS_KM = 25
 const MAX_RADIUS_KM = 100
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
+const JIT_WINDOW_HOURS = 2
+const DEFAULT_JIT_BASE_PRICE_PER_SEAT = 20
 
 const ACTIVE_REQUEST_STATUSES = new Set(["PENDING", "OFFERING", "pending"])
 const ACCEPTED_REQUEST_STATUSES = new Set(["ACCEPTED", "matched"])
@@ -95,6 +103,24 @@ function parseNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function getHoursUntil(date: Date, reference = new Date()) {
+  return (date.getTime() - reference.getTime()) / (1000 * 60 * 60)
+}
+
+function getJitBasePricePerSeat() {
+  const raw = process.env.JIT_BASE_PRICE_PER_SEAT
+  if (!raw) {
+    return DEFAULT_JIT_BASE_PRICE_PER_SEAT
+  }
+
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error("JIT_BASE_PRICE_PER_SEAT must be a positive number")
+  }
+
+  return parsed
 }
 
 /**
@@ -170,6 +196,14 @@ export async function createRide(req: AuthRequest, res: Response) {
         .json({ error: "preferredDate must be a valid ISO date" })
     }
 
+    const hoursUntilDeparture = getHoursUntil(preferredDateValue)
+    if (hoursUntilDeparture >= 0 && hoursUntilDeparture <= JIT_WINDOW_HOURS) {
+      return res.status(400).json({
+        error:
+          "Use POST /api/ride-requests/jit/intent for ride requests within 2 hours",
+      })
+    }
+
     let returnDateValue: Date | null = null
     if (returnDate) {
       const d = new Date(returnDate)
@@ -198,6 +232,7 @@ export async function createRide(req: AuthRequest, res: Response) {
         tripType,
         returnDate: returnDateValue,
         returnTime: returnTime ?? null,
+        mode: "OFFER",
         status: "PENDING",
       },
       include: {
@@ -230,8 +265,12 @@ export async function createRide(req: AuthRequest, res: Response) {
     try {
       await dispatchRideRequest({
         rideRequestId: request.id,
+        pickupName: request.fromCity,
         pickupLat: request.fromLat,
         pickupLng: request.fromLng,
+        dropoffName: request.toCity,
+        dropoffLat: request.toLat,
+        dropoffLng: request.toLng,
       })
       console.info(
         "[realtime] dispatch request sent",
@@ -260,6 +299,198 @@ export async function createRide(req: AuthRequest, res: Response) {
     return res.status(201).json(offeringRequest)
   } catch (err) {
     console.error("POST /ride-requests error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/ride-requests/jit/intent
+ * Passenger creates a payment intent for a just-in-time request (within 2 hours).
+ * The actual ride request is created by webhook after successful payment.
+ */
+export async function createJitRideRequestPaymentIntent(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const body = (req.body ?? {}) as CreateJitRideRequestIntentBody
+    const {
+      fromCity,
+      fromLat,
+      fromLng,
+      toCity,
+      toLat,
+      toLng,
+      preferredDate,
+      preferredTime,
+      arrivalTime,
+      seatsNeeded,
+      rideType,
+      tripType,
+      returnDate,
+      returnTime,
+      basePricePerSeat,
+    } = body
+
+    if (
+      !fromCity ||
+      typeof fromLat !== "number" ||
+      typeof fromLng !== "number" ||
+      !toCity ||
+      typeof toLat !== "number" ||
+      typeof toLng !== "number" ||
+      !preferredDate ||
+      typeof seatsNeeded !== "number" ||
+      !rideType ||
+      !tripType
+    ) {
+      return res.status(400).json({
+        error:
+          "fromCity, fromLat, fromLng, toCity, toLat, toLng, preferredDate, seatsNeeded, rideType, and tripType are required",
+      })
+    }
+
+    if (!isValidLatitude(fromLat) || !isValidLongitude(fromLng)) {
+      return res.status(400).json({
+        error: "fromLat must be between -90 and 90, fromLng between -180 and 180",
+      })
+    }
+
+    if (!isValidLatitude(toLat) || !isValidLongitude(toLng)) {
+      return res.status(400).json({
+        error: "toLat must be between -90 and 90, toLng between -180 and 180",
+      })
+    }
+
+    if (!Number.isFinite(seatsNeeded) || seatsNeeded <= 0) {
+      return res
+        .status(400)
+        .json({ error: "seatsNeeded must be a positive integer" })
+    }
+
+    const preferredDateValue = new Date(preferredDate)
+    if (Number.isNaN(preferredDateValue.getTime())) {
+      return res
+        .status(400)
+        .json({ error: "preferredDate must be a valid ISO date" })
+    }
+
+    const hoursUntilDeparture = getHoursUntil(preferredDateValue)
+    if (hoursUntilDeparture < 0) {
+      return res.status(400).json({
+        error: "preferredDate must be in the future",
+      })
+    }
+    if (hoursUntilDeparture > JIT_WINDOW_HOURS) {
+      return res.status(400).json({
+        error:
+          "JIT request payment intent is only available for departures within 2 hours",
+      })
+    }
+
+    let returnDateValue: Date | null = null
+    if (returnDate) {
+      const d = new Date(returnDate)
+      if (Number.isNaN(d.getTime())) {
+        return res
+          .status(400)
+          .json({ error: "returnDate must be a valid ISO date" })
+      }
+      returnDateValue = d
+    }
+
+    const fallbackBasePricePerSeat = getJitBasePricePerSeat()
+    const resolvedBasePricePerSeat =
+      basePricePerSeat != null
+        ? Number(basePricePerSeat)
+        : fallbackBasePricePerSeat
+
+    if (
+      !Number.isFinite(resolvedBasePricePerSeat) ||
+      resolvedBasePricePerSeat <= 0
+    ) {
+      return res
+        .status(400)
+        .json({ error: "basePricePerSeat must be a positive number" })
+    }
+
+    const pricing = await resolveSeatPrice({
+      fromCity,
+      toCity,
+      fromLat,
+      fromLng,
+      toLat,
+      toLng,
+      seats: seatsNeeded,
+      basePricePerSeat: resolvedBasePricePerSeat,
+      departureTime: preferredDateValue,
+      bookedAt: new Date(),
+      sameDestination: true,
+    })
+
+    const amountCents = Math.round(pricing.pricePerSeat * seatsNeeded * 100)
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      return res.status(400).json({ error: "Invalid JIT fare amount" })
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: amountCents,
+        currency: "cad",
+        automatic_payment_methods: { enabled: true },
+        metadata: {
+          flow: "ride_request_jit",
+          mode: "JIT",
+          passengerId: req.userId,
+          fromCity,
+          fromLat: String(fromLat),
+          fromLng: String(fromLng),
+          toCity,
+          toLat: String(toLat),
+          toLng: String(toLng),
+          preferredDate: preferredDateValue.toISOString(),
+          preferredTime: preferredTime ?? "",
+          arrivalTime: arrivalTime ?? "",
+          seatsNeeded: String(seatsNeeded),
+          rideType,
+          tripType,
+          returnDate: returnDateValue?.toISOString() ?? "",
+          returnTime: returnTime ?? "",
+          quotedPricePerSeat: pricing.pricePerSeat.toFixed(2),
+        },
+      },
+      {
+        idempotencyKey: [
+          "jit",
+          req.userId,
+          preferredDateValue.getTime(),
+          fromLat,
+          fromLng,
+          toLat,
+          toLng,
+          seatsNeeded,
+        ].join(":"),
+      }
+    )
+
+    if (!paymentIntent.client_secret) {
+      return res.status(500).json({ error: "Payment intent missing client secret" })
+    }
+
+    return res.json({
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency,
+      quotedPricePerSeat: pricing.pricePerSeat,
+      requestMode: "JIT",
+    })
+  } catch (err) {
+    console.error("POST /ride-requests/jit/intent error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -903,8 +1134,21 @@ export async function acceptRideRequest(req: AuthRequest, res: Response) {
       select: {
         id: true,
         status: true,
+        mode: true,
         driverId: true,
+        passengerId: true,
+        fromCity: true,
+        fromLat: true,
+        fromLng: true,
+        toCity: true,
+        toLat: true,
+        toLng: true,
+        preferredDate: true,
         seatsNeeded: true,
+        jitPaymentIntentId: true,
+        jitAmountCents: true,
+        jitCurrency: true,
+        quotedPricePerSeat: true,
       },
     })
 
@@ -957,8 +1201,157 @@ export async function acceptRideRequest(req: AuthRequest, res: Response) {
         .json({ error: "seatsOffered must be a positive number" })
     }
 
+    const fallbackPricePerSeat =
+      rideRequest.quotedPricePerSeat != null
+        ? Number(rideRequest.quotedPricePerSeat)
+        : rideRequest.jitAmountCents != null
+          ? Number(
+              (
+                rideRequest.jitAmountCents /
+                Math.max(rideRequest.seatsNeeded, 1) /
+                100
+              ).toFixed(2)
+            )
+          : 0
+
     const resolvedPricePerSeat =
-      pricePerSeat != null ? Number(pricePerSeat) : 0
+      pricePerSeat != null ? Number(pricePerSeat) : fallbackPricePerSeat
+
+    if (rideRequest.mode === "JIT") {
+      if (!Number.isFinite(resolvedPricePerSeat) || resolvedPricePerSeat <= 0) {
+        return res
+          .status(400)
+          .json({ error: "pricePerSeat must be a positive number" })
+      }
+
+      if (resolvedSeatsOffered < rideRequest.seatsNeeded) {
+        return res.status(400).json({
+          error:
+            "seatsOffered must be at least seatsNeeded for JIT ride requests",
+        })
+      }
+
+      const [updatedRideRequest, createdRide, booking, acceptedOffer] =
+        await prisma.$transaction(async (tx) => {
+          const updatedRequest = await tx.rideRequest.update({
+            where: { id: rideRequest.id },
+            data: {
+              status: "ACCEPTED",
+              driverId,
+            },
+          })
+
+          const ride = await tx.ride.create({
+            data: {
+              driverId,
+              fromCity: rideRequest.fromCity,
+              fromLat: rideRequest.fromLat,
+              fromLng: rideRequest.fromLng,
+              toCity: rideRequest.toCity,
+              toLat: rideRequest.toLat,
+              toLng: rideRequest.toLng,
+              startTime: rideRequest.preferredDate,
+              pricePerSeat: resolvedPricePerSeat,
+              seatsTotal: resolvedSeatsOffered,
+              seatsAvailable: Math.max(
+                resolvedSeatsOffered - rideRequest.seatsNeeded,
+                0
+              ),
+              status: "open",
+            },
+          })
+
+          const createdBooking = await tx.booking.create({
+            data: {
+              rideId: ride.id,
+              passengerId: rideRequest.passengerId,
+              seatsBooked: rideRequest.seatsNeeded,
+              passengerPickupName: rideRequest.fromCity,
+              passengerPickupLat: rideRequest.fromLat,
+              passengerPickupLng: rideRequest.fromLng,
+              passengerDropoffName: rideRequest.toCity,
+              passengerDropoffLat: rideRequest.toLat,
+              passengerDropoffLng: rideRequest.toLng,
+              status: "CONFIRMED",
+              paymentStatus: "paid",
+              stripePaymentIntentId: rideRequest.jitPaymentIntentId,
+            },
+          })
+
+          if (rideRequest.jitPaymentIntentId) {
+            const amountCents =
+              rideRequest.jitAmountCents ??
+              Math.round(
+                resolvedPricePerSeat * rideRequest.seatsNeeded * 100
+              )
+            const platformFeeCents = Math.round(
+              amountCents * getPlatformFeePct()
+            )
+            await tx.payment.upsert({
+              where: { paymentIntentId: rideRequest.jitPaymentIntentId },
+              create: {
+                bookingId: createdBooking.id,
+                paymentIntentId: rideRequest.jitPaymentIntentId,
+                amountCents,
+                platformFeeCents,
+                currency: rideRequest.jitCurrency ?? "cad",
+                status: "succeeded",
+              },
+              update: {
+                bookingId: createdBooking.id,
+                amountCents,
+                platformFeeCents,
+                currency: rideRequest.jitCurrency ?? "cad",
+                status: "succeeded",
+              },
+            })
+          }
+
+          const offer = await tx.rideRequestOffer.upsert({
+            where: {
+              rideRequestId_driverId: {
+                rideRequestId: rideRequest.id,
+                driverId,
+              },
+            },
+            create: {
+              rideRequestId: rideRequest.id,
+              driverId,
+              rideId: ride.id,
+              seatsOffered: resolvedSeatsOffered,
+              pricePerSeat: resolvedPricePerSeat,
+              status: "ACCEPTED",
+            },
+            update: {
+              rideId: ride.id,
+              seatsOffered: resolvedSeatsOffered,
+              pricePerSeat: resolvedPricePerSeat,
+              status: "ACCEPTED",
+            },
+          })
+
+          await tx.rideRequestOffer.updateMany({
+            where: {
+              rideRequestId: rideRequest.id,
+              driverId: { not: driverId },
+              status: { in: ["SENT", "pending"] },
+            },
+            data: { status: "REJECTED" },
+          })
+
+          return [updatedRequest, ride, createdBooking, offer] as const
+        })
+
+      return res.status(200).json({
+        ok: true,
+        idempotent: false,
+        rideRequest: updatedRideRequest,
+        ride: createdRide,
+        booking,
+        offer: acceptedOffer,
+      })
+    }
+
     if (!Number.isFinite(resolvedPricePerSeat) || resolvedPricePerSeat < 0) {
       return res
         .status(400)

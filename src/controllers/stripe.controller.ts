@@ -2,6 +2,7 @@ import type { Request, Response } from "express"
 import Stripe from "stripe"
 import prisma from "../lib/prisma.js"
 import type { AuthRequest } from "../middleware/auth.js"
+import { dispatchRideRequest } from "../lib/realtime.js"
 import { getStripeWebhookSecret, stripe } from "../lib/stripe.js"
 
 /**
@@ -54,13 +55,20 @@ export async function handleStripeWebhook(req: Request, res: Response) {
       if (!intent?.id) {
         return res.status(400).send("Invalid PaymentIntent")
       }
-      await handlePaymentIntentUpdate({
-        eventId: event.id,
-        paymentIntentId: intent.id,
-        paymentStatus: "succeeded",
-        bookingStatus: "CONFIRMED",
-        bookingPaymentStatus: "paid",
-      })
+      if (intent.metadata?.flow === "ride_request_jit") {
+        await handleJitRideRequestIntentSucceeded({
+          eventId: event.id,
+          intent,
+        })
+      } else {
+        await handlePaymentIntentUpdate({
+          eventId: event.id,
+          paymentIntentId: intent.id,
+          paymentStatus: "succeeded",
+          bookingStatus: "CONFIRMED",
+          bookingPaymentStatus: "paid",
+        })
+      }
     }
 
     if (event.type === "payment_intent.payment_failed") {
@@ -68,13 +76,15 @@ export async function handleStripeWebhook(req: Request, res: Response) {
       if (!intent?.id) {
         return res.status(400).send("Invalid PaymentIntent")
       }
-      await handlePaymentIntentUpdate({
-        eventId: event.id,
-        paymentIntentId: intent.id,
-        paymentStatus: "failed",
-        bookingStatus: "ACCEPTED",
-        bookingPaymentStatus: "failed",
-      })
+      if (intent.metadata?.flow !== "ride_request_jit") {
+        await handlePaymentIntentUpdate({
+          eventId: event.id,
+          paymentIntentId: intent.id,
+          paymentStatus: "failed",
+          bookingStatus: "ACCEPTED",
+          bookingPaymentStatus: "failed",
+        })
+      }
     }
 
     if (event.type === "charge.refunded") {
@@ -101,6 +111,151 @@ export async function handleStripeWebhook(req: Request, res: Response) {
   }
 
   return res.json({ received: true })
+}
+
+function requireMetadataString(
+  metadata: Stripe.Metadata,
+  key: string
+): string {
+  const value = metadata[key]
+  if (!value || value.trim().length === 0) {
+    throw new Error(`Missing metadata field: ${key}`)
+  }
+  return value
+}
+
+function parseMetadataNumber(metadata: Stripe.Metadata, key: string): number {
+  const value = requireMetadataString(metadata, key)
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid metadata number: ${key}`)
+  }
+  return parsed
+}
+
+async function handleJitRideRequestIntentSucceeded({
+  eventId,
+  intent,
+}: {
+  eventId: string
+  intent: Stripe.PaymentIntent
+}) {
+  const existing = await prisma.rideRequest.findUnique({
+    where: { jitPaymentIntentId: intent.id },
+    select: { id: true, status: true, driverId: true },
+  })
+
+  if (existing) {
+    console.info(
+      "[webhooks][stripe] JIT ride request already created",
+      JSON.stringify({
+        eventId,
+        paymentIntentId: intent.id,
+        rideRequestId: existing.id,
+      })
+    )
+    return
+  }
+
+  const metadata = intent.metadata ?? {}
+  const passengerId = requireMetadataString(metadata, "passengerId")
+  const fromCity = requireMetadataString(metadata, "fromCity")
+  const fromLat = parseMetadataNumber(metadata, "fromLat")
+  const fromLng = parseMetadataNumber(metadata, "fromLng")
+  const toCity = requireMetadataString(metadata, "toCity")
+  const toLat = parseMetadataNumber(metadata, "toLat")
+  const toLng = parseMetadataNumber(metadata, "toLng")
+  const preferredDateRaw = requireMetadataString(metadata, "preferredDate")
+  const seatsNeeded = parseMetadataNumber(metadata, "seatsNeeded")
+  const rideType = requireMetadataString(metadata, "rideType")
+  const tripType = requireMetadataString(metadata, "tripType")
+
+  const preferredDate = new Date(preferredDateRaw)
+  if (Number.isNaN(preferredDate.getTime())) {
+    throw new Error("Invalid metadata date: preferredDate")
+  }
+
+  const returnDateRaw = metadata.returnDate?.trim()
+  const returnDate =
+    returnDateRaw && returnDateRaw.length > 0 ? new Date(returnDateRaw) : null
+  if (returnDate && Number.isNaN(returnDate.getTime())) {
+    throw new Error("Invalid metadata date: returnDate")
+  }
+
+  const amountCents = intent.amount_received || intent.amount || 0
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    throw new Error("Invalid payment amount for JIT ride request")
+  }
+
+  const quotedPriceFromMetadata = Number(metadata.quotedPricePerSeat ?? "")
+  const quotedPricePerSeat =
+    Number.isFinite(quotedPriceFromMetadata) && quotedPriceFromMetadata > 0
+      ? quotedPriceFromMetadata
+      : Number((amountCents / Math.max(seatsNeeded, 1) / 100).toFixed(2))
+
+  const passenger = await prisma.user.findUnique({
+    where: { id: passengerId },
+    select: { id: true },
+  })
+  if (!passenger) {
+    throw new Error("Passenger not found for JIT ride request payment")
+  }
+
+  const createdRequest = await prisma.rideRequest.create({
+    data: {
+      passengerId,
+      mode: "JIT",
+      jitPaymentIntentId: intent.id,
+      jitAmountCents: amountCents,
+      jitCurrency: intent.currency ?? "cad",
+      quotedPricePerSeat,
+      fromCity,
+      fromLat,
+      fromLng,
+      toCity,
+      toLat,
+      toLng,
+      preferredDate,
+      preferredTime: metadata.preferredTime?.trim() || null,
+      arrivalTime: metadata.arrivalTime?.trim() || null,
+      seatsNeeded,
+      rideType,
+      tripType,
+      returnDate,
+      returnTime: metadata.returnTime?.trim() || null,
+      status: "OFFERING",
+    },
+  })
+
+  try {
+    await dispatchRideRequest({
+      rideRequestId: createdRequest.id,
+      pickupName: createdRequest.fromCity,
+      pickupLat: createdRequest.fromLat,
+      pickupLng: createdRequest.fromLng,
+      dropoffName: createdRequest.toCity,
+      dropoffLat: createdRequest.toLat,
+      dropoffLng: createdRequest.toLng,
+    })
+    console.info(
+      "[webhooks][stripe] JIT ride request dispatched",
+      JSON.stringify({
+        eventId,
+        paymentIntentId: intent.id,
+        rideRequestId: createdRequest.id,
+      })
+    )
+  } catch (dispatchErr) {
+    console.error(
+      "[webhooks][stripe] Failed to dispatch JIT ride request",
+      JSON.stringify({
+        eventId,
+        paymentIntentId: intent.id,
+        rideRequestId: createdRequest.id,
+      }),
+      dispatchErr
+    )
+  }
 }
 
 type PaymentStatusUpdate = "succeeded" | "failed" | "refunded"
