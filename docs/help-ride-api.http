@@ -627,6 +627,7 @@ Content-Type: application/json
 ###
 
 ### CANCEL OWN RIDE REQUEST
+# NOTE: For JIT requests, this also initiates Stripe refund before cancellation.
 POST {{baseUrl}}/ride-requests/{{rideRequestId}}/cancel
 Authorization: Bearer {{accessToken}}
 

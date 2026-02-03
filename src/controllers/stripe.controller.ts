@@ -133,6 +133,75 @@ function parseMetadataNumber(metadata: Stripe.Metadata, key: string): number {
   return parsed
 }
 
+const DISPATCHABLE_RIDE_REQUEST_STATUSES = new Set([
+  "PENDING",
+  "OFFERING",
+  "pending",
+])
+
+type DispatchableJitRideRequest = {
+  id: string
+  status: string
+  driverId: string | null
+  fromCity: string
+  fromLat: number
+  fromLng: number
+  toCity: string
+  toLat: number
+  toLng: number
+}
+
+function canRedispatchRideRequest(request: DispatchableJitRideRequest) {
+  return (
+    DISPATCHABLE_RIDE_REQUEST_STATUSES.has(request.status) &&
+    request.driverId == null
+  )
+}
+
+async function dispatchJitRideRequest({
+  eventId,
+  paymentIntentId,
+  rideRequest,
+  source,
+}: {
+  eventId: string
+  paymentIntentId: string
+  rideRequest: DispatchableJitRideRequest
+  source: "created" | "existing"
+}) {
+  try {
+    await dispatchRideRequest({
+      rideRequestId: rideRequest.id,
+      pickupName: rideRequest.fromCity,
+      pickupLat: rideRequest.fromLat,
+      pickupLng: rideRequest.fromLng,
+      dropoffName: rideRequest.toCity,
+      dropoffLat: rideRequest.toLat,
+      dropoffLng: rideRequest.toLng,
+    })
+    console.info(
+      "[webhooks][stripe] JIT ride request dispatched",
+      JSON.stringify({
+        eventId,
+        paymentIntentId,
+        rideRequestId: rideRequest.id,
+        source,
+      })
+    )
+  } catch (dispatchErr) {
+    console.error(
+      "[webhooks][stripe] Failed to dispatch JIT ride request",
+      JSON.stringify({
+        eventId,
+        paymentIntentId,
+        rideRequestId: rideRequest.id,
+        source,
+      }),
+      dispatchErr
+    )
+  }
+}
+
 async function handleJitRideRequestIntentSucceeded({
   eventId,
   intent,
@@ -142,7 +211,17 @@ async function handleJitRideRequestIntentSucceeded({
 }) {
   const existing = await prisma.rideRequest.findUnique({
     where: { jitPaymentIntentId: intent.id },
-    select: { id: true, status: true, driverId: true },
+    select: {
+      id: true,
+      status: true,
+      driverId: true,
+      fromCity: true,
+      fromLat: true,
+      fromLng: true,
+      toCity: true,
+      toLat: true,
+      toLng: true,
+    },
   })
 
   if (existing) {
@@ -154,6 +233,27 @@ async function handleJitRideRequestIntentSucceeded({
         rideRequestId: existing.id,
       })
     )
+
+    if (canRedispatchRideRequest(existing)) {
+      await dispatchJitRideRequest({
+        eventId,
+        paymentIntentId: intent.id,
+        rideRequest: existing,
+        source: "existing",
+      })
+    } else {
+      console.info(
+        "[webhooks][stripe] JIT ride request redispatch skipped",
+        JSON.stringify({
+          eventId,
+          paymentIntentId: intent.id,
+          rideRequestId: existing.id,
+          status: existing.status,
+          hasDriver: Boolean(existing.driverId),
+        })
+      )
+    }
+
     return
   }
 
@@ -227,35 +327,12 @@ async function handleJitRideRequestIntentSucceeded({
     },
   })
 
-  try {
-    await dispatchRideRequest({
-      rideRequestId: createdRequest.id,
-      pickupName: createdRequest.fromCity,
-      pickupLat: createdRequest.fromLat,
-      pickupLng: createdRequest.fromLng,
-      dropoffName: createdRequest.toCity,
-      dropoffLat: createdRequest.toLat,
-      dropoffLng: createdRequest.toLng,
-    })
-    console.info(
-      "[webhooks][stripe] JIT ride request dispatched",
-      JSON.stringify({
-        eventId,
-        paymentIntentId: intent.id,
-        rideRequestId: createdRequest.id,
-      })
-    )
-  } catch (dispatchErr) {
-    console.error(
-      "[webhooks][stripe] Failed to dispatch JIT ride request",
-      JSON.stringify({
-        eventId,
-        paymentIntentId: intent.id,
-        rideRequestId: createdRequest.id,
-      }),
-      dispatchErr
-    )
-  }
+  await dispatchJitRideRequest({
+    eventId,
+    paymentIntentId: intent.id,
+    rideRequest: createdRequest,
+    source: "created",
+  })
 }
 
 type PaymentStatusUpdate = "succeeded" | "failed" | "refunded"

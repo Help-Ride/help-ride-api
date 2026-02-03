@@ -9,12 +9,19 @@ export type RefundSource =
   | "passenger_cancel_booking"
   | "driver_cancel_booking"
   | "driver_cancel_ride"
+  | "passenger_cancel_ride_request"
 
 export interface InitiateBookingRefundInput {
   bookingId: string
   paymentStatus: string
   stripePaymentIntentId: string | null
   source: RefundSource
+}
+
+export interface InitiateRideRequestRefundInput {
+  rideRequestId: string
+  stripePaymentIntentId: string | null
+  source: Extract<RefundSource, "passenger_cancel_ride_request">
 }
 
 function isAlreadyRefundedStripeError(err: unknown) {
@@ -95,6 +102,73 @@ export async function initiateBookingRefundIfPaid({
         "[payments] Refund already processed",
         JSON.stringify({
           bookingId,
+          paymentIntentId: stripePaymentIntentId,
+          source,
+        })
+      )
+
+      return { refunded: false, reason: "already_refunded" as const }
+    }
+
+    throw err
+  }
+}
+
+export async function initiateRideRequestRefund({
+  rideRequestId,
+  stripePaymentIntentId,
+  source,
+}: InitiateRideRequestRefundInput) {
+  if (!stripePaymentIntentId) {
+    return { refunded: false, reason: "missing_payment_intent" as const }
+  }
+
+  const existingPayment = await prisma.payment.findUnique({
+    where: { paymentIntentId: stripePaymentIntentId },
+    select: { status: true },
+  })
+
+  if (existingPayment?.status === "refunded") {
+    return { refunded: false, reason: "already_refunded" as const }
+  }
+
+  try {
+    const refund = await stripe.refunds.create(
+      {
+        payment_intent: stripePaymentIntentId,
+        reason: "requested_by_customer",
+        metadata: {
+          rideRequestId,
+          source,
+        },
+      },
+      {
+        idempotencyKey: `ride_request:${rideRequestId}:refund:${source}`,
+      }
+    )
+
+    console.info(
+      "[payments] Ride request refund initiated",
+      JSON.stringify({
+        rideRequestId,
+        paymentIntentId: stripePaymentIntentId,
+        refundId: refund.id,
+        refundStatus: refund.status,
+        source,
+      })
+    )
+
+    return {
+      refunded: true,
+      reason: "refund_initiated" as const,
+      refundId: refund.id,
+    }
+  } catch (err) {
+    if (isAlreadyRefundedStripeError(err)) {
+      console.info(
+        "[payments] Ride request refund already processed",
+        JSON.stringify({
+          rideRequestId,
           paymentIntentId: stripePaymentIntentId,
           source,
         })

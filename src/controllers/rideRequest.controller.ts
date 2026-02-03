@@ -1,9 +1,11 @@
 // src/controllers/rideRequest.controller.ts
+import { createHash } from "node:crypto"
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { notifyUsersByRole } from "../lib/notifications.js"
 import { resolveSeatPrice } from "../lib/pricing.js"
+import { initiateRideRequestRefund } from "../lib/refunds.js"
 import { getPlatformFeePct, stripe } from "../lib/stripe.js"
 import {
   dispatchRideRequest,
@@ -121,6 +123,25 @@ function getJitBasePricePerSeat() {
   }
 
   return parsed
+}
+
+function buildJitIntentIdempotencyKey(input: {
+  passengerId: string
+  amountCents: number
+  currency: string
+  metadata: Record<string, string>
+}) {
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify({
+        amountCents: input.amountCents,
+        currency: input.currency,
+        metadata: input.metadata,
+      })
+    )
+    .digest("hex")
+
+  return `jit:${input.passengerId}:${fingerprint}`
 }
 
 /**
@@ -437,44 +458,42 @@ export async function createJitRideRequestPaymentIntent(
       return res.status(400).json({ error: "Invalid JIT fare amount" })
     }
 
+    const metadata = {
+      flow: "ride_request_jit",
+      mode: "JIT",
+      passengerId: req.userId,
+      fromCity,
+      fromLat: String(fromLat),
+      fromLng: String(fromLng),
+      toCity,
+      toLat: String(toLat),
+      toLng: String(toLng),
+      preferredDate: preferredDateValue.toISOString(),
+      preferredTime: preferredTime ?? "",
+      arrivalTime: arrivalTime ?? "",
+      seatsNeeded: String(seatsNeeded),
+      rideType,
+      tripType,
+      returnDate: returnDateValue?.toISOString() ?? "",
+      returnTime: returnTime ?? "",
+      quotedPricePerSeat: pricing.pricePerSeat.toFixed(2),
+    }
+
+    const idempotencyKey = buildJitIntentIdempotencyKey({
+      passengerId: req.userId,
+      amountCents,
+      currency: "cad",
+      metadata,
+    })
+
     const paymentIntent = await stripe.paymentIntents.create(
       {
         amount: amountCents,
         currency: "cad",
         automatic_payment_methods: { enabled: true },
-        metadata: {
-          flow: "ride_request_jit",
-          mode: "JIT",
-          passengerId: req.userId,
-          fromCity,
-          fromLat: String(fromLat),
-          fromLng: String(fromLng),
-          toCity,
-          toLat: String(toLat),
-          toLng: String(toLng),
-          preferredDate: preferredDateValue.toISOString(),
-          preferredTime: preferredTime ?? "",
-          arrivalTime: arrivalTime ?? "",
-          seatsNeeded: String(seatsNeeded),
-          rideType,
-          tripType,
-          returnDate: returnDateValue?.toISOString() ?? "",
-          returnTime: returnTime ?? "",
-          quotedPricePerSeat: pricing.pricePerSeat.toFixed(2),
-        },
+        metadata,
       },
-      {
-        idempotencyKey: [
-          "jit",
-          req.userId,
-          preferredDateValue.getTime(),
-          fromLat,
-          fromLng,
-          toLat,
-          toLng,
-          seatsNeeded,
-        ].join(":"),
-      }
+      { idempotencyKey }
     )
 
     if (!paymentIntent.client_secret) {
@@ -1071,6 +1090,25 @@ export async function cancelRideRequest(req: AuthRequest, res: Response) {
       return res.status(400).json({
         error: "Only active ride requests can be cancelled",
       })
+    }
+
+    if (existing.mode === "JIT") {
+      try {
+        await initiateRideRequestRefund({
+          rideRequestId: existing.id,
+          stripePaymentIntentId: existing.jitPaymentIntentId,
+          source: "passenger_cancel_ride_request",
+        })
+      } catch (refundErr) {
+        console.error("Refund initiation failed for ride request cancellation", {
+          rideRequestId: existing.id,
+          paymentIntentId: existing.jitPaymentIntentId,
+          err: refundErr,
+        })
+        return res.status(502).json({
+          error: "Unable to initiate refund for this cancellation. Please retry.",
+        })
+      }
     }
 
     const updated = await prisma.rideRequest.update({

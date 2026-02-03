@@ -10,6 +10,31 @@ dotenv.config()
 const app = express()
 
 app.use(cors())
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint()
+
+  res.on("finish", () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
+    const payload = {
+      method: req.method,
+      path: req.originalUrl || req.url,
+      statusCode: res.statusCode,
+      durationMs: Number(durationMs.toFixed(2)),
+    }
+
+    if (res.statusCode >= 500) {
+      console.error("[http] request", JSON.stringify(payload))
+      return
+    }
+    if (res.statusCode >= 400) {
+      console.warn("[http] request", JSON.stringify(payload))
+      return
+    }
+    console.info("[http] request", JSON.stringify(payload))
+  })
+
+  next()
+})
 app.use("/api/webhooks", webhookRoutes)
 app.use(express.json())
 
