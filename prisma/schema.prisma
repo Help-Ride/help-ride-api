@@ -50,6 +50,12 @@ enum NotificationType {
   system
 }
 
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
 enum DriverDocumentType {
   license
   insurance
@@ -90,6 +96,9 @@ model User {
   emailVerifyOtp            String?
   emailVerifyOtpExpiresAt   DateTime?
   emailVerifyOtpAttempts    Int              @default(0)
+  passwordResetOtp          String?
+  passwordResetOtpExpiresAt DateTime?
+  passwordResetOtpAttempts  Int              @default(0)
 
   createdAt                 DateTime         @default(now())
   updatedAt                 DateTime         @updatedAt
@@ -101,7 +110,13 @@ model User {
   notifications        Notification[]
   sosEvents            SosEvent[]
   rideRequests         RideRequest[]
+  rideRequestOffers    RideRequestOffer[]
   driverDocuments      DriverDocument[]
+  refreshTokens        RefreshToken[]
+  passengerConversations Conversation[] @relation("PassengerConversations")
+  driverConversations    Conversation[] @relation("DriverConversations")
+  messages               Message[]
+  deviceTokens           DeviceToken[]
 }
 
 model OAuthAccount {
@@ -117,6 +132,21 @@ model OAuthAccount {
   updatedAt        DateTime     @updatedAt
 
   @@unique([provider, providerUserId])
+}
+
+model RefreshToken {
+  id                 String   @id @default(uuid())
+  user               User     @relation(fields: [userId], references: [id])
+  userId             String
+  tokenHash          String   @unique
+  expiresAt          DateTime
+  revokedAt          DateTime?
+  replacedByTokenId  String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model DriverProfile {
@@ -156,6 +186,21 @@ model Ride {
 
   bookings        Booking[]
   sosEvents       SosEvent[]
+  conversations   Conversation[]
+  rideRequestOffers RideRequestOffer[]
+}
+
+model FixedRoutePrice {
+  id           String   @id @default(uuid())
+  fromCity     String
+  toCity       String
+  pricePerSeat Decimal  @db.Decimal(10, 2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([fromCity])
+  @@index([toCity])
 }
 
 model Booking {
@@ -197,6 +242,18 @@ model Notification {
   createdAt   DateTime         @default(now())
 }
 
+model DeviceToken {
+  id        String          @id @default(uuid())
+  user      User            @relation(fields: [userId], references: [id])
+  userId    String
+  token     String          @unique
+  platform  DevicePlatform?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([userId])
+}
+
 model SosEvent {
   id        String   @id @default(uuid())
   user      User     @relation(fields: [userId], references: [id])
@@ -208,11 +265,51 @@ model SosEvent {
   createdAt DateTime @default(now())
 }
 
+model Conversation {
+  id                 String    @id @default(uuid())
+  ride               Ride?     @relation(fields: [rideId], references: [id])
+  rideId             String?
+  passenger          User      @relation("PassengerConversations", fields: [passengerId], references: [id])
+  passengerId        String
+  driver             User      @relation("DriverConversations", fields: [driverId], references: [id])
+  driverId           String
+  lastMessageAt      DateTime?
+  lastMessagePreview String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  messages           Message[]
+
+  @@index([passengerId])
+  @@index([driverId])
+  @@index([rideId])
+  @@unique([rideId, passengerId, driverId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
+  sender         User         @relation(fields: [senderId], references: [id])
+  senderId       String
+  body           String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
 enum RideRequestStatus {
   pending
   matched
   cancelled
   expired
+}
+
+enum RideRequestOfferStatus {
+  pending
+  accepted
+  rejected
+  cancelled
 }
 
 model RideRequest {
@@ -246,8 +343,30 @@ model RideRequest {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
+  offers         RideRequestOffer[]
+
   @@index([status])
   @@index([fromCity])
   @@index([toCity])
   @@index([passengerId])
+}
+
+model RideRequestOffer {
+  id             String                  @id @default(uuid())
+  rideRequest    RideRequest             @relation(fields: [rideRequestId], references: [id])
+  rideRequestId  String
+  driver         User                    @relation(fields: [driverId], references: [id])
+  driverId       String
+  ride           Ride                    @relation(fields: [rideId], references: [id])
+  rideId         String
+  seatsOffered   Int
+  pricePerSeat   Decimal                 @db.Decimal(10, 2)
+  status         RideRequestOfferStatus  @default(pending)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  @@index([rideRequestId])
+  @@index([driverId])
+  @@index([rideId])
+  @@unique([rideRequestId, driverId, rideId])
 }

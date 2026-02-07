@@ -10,11 +10,21 @@ import {
   getRideRequestById,
   deleteRideRequest,
 } from "../controllers/rideRequest.controller.js"
+import {
+  acceptRideRequestOffer,
+  cancelRideRequestOffer,
+  createRideRequestOffer,
+  listMyRideRequestOffers,
+  listRideRequestOffers,
+  rejectRideRequestOffer,
+} from "../controllers/rideRequestOffer.controller.js"
 
 const router = Router()
 
 // Passenger: my requests (auth)
 router.get("/me/list", authGuard, getMyRideRequests)
+// Driver: my offers (auth)
+router.get("/offers/me/list", authGuard, listMyRideRequestOffers)
 
 // Public list/search
 router.get("/", listRideRequests)
@@ -26,6 +36,31 @@ router.put("/:id", authGuard, requireVerifiedEmail, updateRide)
 
 // Passenger: create request (must be verified)
 router.post("/", authGuard, requireVerifiedEmail, createRide)
+
+// Driver: create offer for a request
+router.post("/:id/offers", authGuard, requireVerifiedEmail, createRideRequestOffer)
+// Passenger: list offers for a request (driver sees own offers)
+router.get("/:id/offers", authGuard, listRideRequestOffers)
+// Passenger: accept or reject offer
+router.put(
+  "/:id/offers/:offerId/accept",
+  authGuard,
+  requireVerifiedEmail,
+  acceptRideRequestOffer
+)
+router.put(
+  "/:id/offers/:offerId/reject",
+  authGuard,
+  requireVerifiedEmail,
+  rejectRideRequestOffer
+)
+// Driver: cancel offer
+router.put(
+  "/:id/offers/:offerId/cancel",
+  authGuard,
+  requireVerifiedEmail,
+  cancelRideRequestOffer
+)
 
 // Passenger: cancel own request
 router.delete("/:id", authGuard, requireVerifiedEmail, deleteRideRequest)
