@@ -163,6 +163,27 @@ Accept: application/json
 ###
 
 ################################################
+### 👤 USERS
+################################################
+
+### GET USER PROFILE (PUBLIC)
+GET {{baseUrl}}/users/{{userId}}
+Accept: application/json
+
+###
+
+### UPDATE OWN USER PROFILE
+PUT {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Updated Name"
+}
+
+###
+
+################################################
 ### 🚗 RIDES – DRIVER FLOW
 ################################################
 
@@ -400,6 +421,22 @@ Accept: application/json
 
 ###
 
+### PASSENGER: CANCEL BOOKING (PUT alias)
+# If booking was paid, refund is initiated automatically.
+PUT {{baseUrl}}/bookings/{{bookingId}}/cancel
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### PASSENGER: CANCEL BOOKING (DELETE alias)
+# If booking was paid, refund is initiated automatically.
+DELETE {{baseUrl}}/bookings/{{bookingId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### DRIVER: CANCEL PASSENGER BOOKING
 # If booking was paid, refund is initiated automatically.
 POST {{baseUrl}}/bookings/{{bookingId}}/driver-cancel
@@ -537,6 +574,26 @@ Content-Type: application/json
 
 ###
 
+# Set this from GET DRIVER PROFILE response (DriverProfile.id)
+@vehicleId =
+
+### UPDATE VEHICLE (ALIAS, SINGLE VEHICLE)
+PUT {{baseUrl}}/drivers/{{userId}}/vehicles/{{vehicleId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "carColor": "Blue"
+}
+
+###
+
+### DELETE VEHICLE (ALIAS, SINGLE VEHICLE)
+DELETE {{baseUrl}}/drivers/{{userId}}/vehicles/{{vehicleId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
 ################################################
 ### 📌 RIDE REQUESTS (WHEN NO MATCHING RIDES)
 ################################################
@@ -609,6 +666,12 @@ Accept: application/json
 
 ### GET SINGLE RIDE REQUEST (PUBLIC)
 GET {{baseUrl}}/ride-requests/{{rideRequestId}}
+Accept: application/json
+
+###
+
+### GET RIDE REQUEST DETAIL (PUBLIC, INCLUDES OFFERS)
+GET {{baseUrl}}/ride-requests/{{rideRequestId}}/detail
 Accept: application/json
 
 ###

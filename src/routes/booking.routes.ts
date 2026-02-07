@@ -29,6 +29,8 @@ router.get("/driver/me", authGuard, getDriverBookingsInbox)
 
 // Passenger: cancel booking
 router.post("/:id/cancel", authGuard, requireVerifiedEmail, cancelBookingByPassenger)
+router.put("/:id/cancel", authGuard, requireVerifiedEmail, cancelBookingByPassenger)
+router.delete("/:id", authGuard, requireVerifiedEmail, cancelBookingByPassenger)
 
 // Driver: cancel passenger booking
 router.post(

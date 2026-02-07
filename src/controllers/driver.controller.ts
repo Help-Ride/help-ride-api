@@ -181,6 +181,105 @@ export async function updateDriverProfile(req: AuthRequest, res: Response) {
 }
 
 /**
+ * PUT /api/drivers/:id/vehicles/:vehicleId
+ * Compatibility endpoint for frontend "vehicle management".
+ * Backed by the single DriverProfile record (vehicleId = driverProfile.id).
+ */
+export async function updateDriverVehicle(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id, vehicleId } = req.params
+    if (!id || !vehicleId) {
+      return res.status(400).json({ error: "id and vehicleId are required" })
+    }
+
+    if (id !== req.userId) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "You can only update your own vehicles",
+      })
+    }
+
+    const profile = await prisma.driverProfile.findUnique({
+      where: { userId: id },
+      select: { id: true },
+    })
+
+    if (!profile) {
+      return res.status(404).json({ error: "Driver profile not found" })
+    }
+
+    if (profile.id !== vehicleId) {
+      return res.status(404).json({ error: "Vehicle not found" })
+    }
+
+    return updateDriverProfile(req, res)
+  } catch (err) {
+    console.error("PUT /api/drivers/:id/vehicles/:vehicleId error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * DELETE /api/drivers/:id/vehicles/:vehicleId
+ * Removes the driver's single vehicle (DriverProfile).
+ */
+export async function deleteDriverVehicle(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id, vehicleId } = req.params
+    if (!id || !vehicleId) {
+      return res.status(400).json({ error: "id and vehicleId are required" })
+    }
+
+    if (id !== req.userId) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "You can only delete your own vehicles",
+      })
+    }
+
+    const profile = await prisma.driverProfile.findUnique({
+      where: { userId: id },
+      select: { id: true },
+    })
+
+    if (!profile) {
+      return res.status(404).json({ error: "Driver profile not found" })
+    }
+
+    if (profile.id !== vehicleId) {
+      return res.status(404).json({ error: "Vehicle not found" })
+    }
+
+    const activeRidesCount = await prisma.ride.count({
+      where: {
+        driverId: id,
+        status: { in: ["open", "ongoing"] },
+      },
+    })
+
+    if (activeRidesCount > 0) {
+      return res.status(409).json({
+        error: "Cannot delete vehicle while you have active rides",
+      })
+    }
+
+    await prisma.driverProfile.delete({ where: { userId: id } })
+    return res.status(204).send()
+  } catch (err) {
+    console.error("DELETE /api/drivers/:id/vehicles/:vehicleId error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
  * GET /api/drivers/me/summary
  * Authenticated driver's rides + earnings summary.
  */

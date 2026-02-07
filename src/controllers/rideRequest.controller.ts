@@ -1004,6 +1004,76 @@ export async function getMyRideRequests(req: AuthRequest, res: Response) {
 }
 
 /**
+ * GET /api/ride-requests/:id/detail
+ * Public ride request detail view (includes offers).
+ */
+export async function getRideRequestDetail(req: AuthRequest, res: Response) {
+  try {
+    const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: "id is required" })
+    }
+
+    const request = await prisma.rideRequest.findUnique({
+      where: { id },
+      include: {
+        passenger: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+        driver: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            providerAvatarUrl: true,
+          },
+        },
+        offers: {
+          orderBy: { createdAt: "desc" },
+          include: {
+            ride: {
+              select: {
+                id: true,
+                fromCity: true,
+                toCity: true,
+                startTime: true,
+                pricePerSeat: true,
+                seatsTotal: true,
+                seatsAvailable: true,
+                status: true,
+                driverId: true,
+              },
+            },
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                providerAvatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    if (!request) {
+      return res.status(404).json({ error: "Ride request not found" })
+    }
+
+    return res.json(request)
+  } catch (err) {
+    console.error("GET /ride-requests/:id/detail error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
  * GET /api/ride-requests/:id
  * Public single ride request
  */

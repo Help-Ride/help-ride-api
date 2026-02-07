@@ -11,6 +11,7 @@ import {
   updateRide,
   listRideRequests,
   getMyRideRequests,
+  getRideRequestDetail,
   getRideRequestById,
   deleteRideRequest,
 } from "../controllers/rideRequest.controller.js"
@@ -37,6 +38,7 @@ router.post("/:id/accept", acceptRideRequest)
 router.get("/", rateLimit({ windowMs: 60_000, max: 60 }), listRideRequests)
 
 // Public detail
+router.get("/:id/detail", getRideRequestDetail)
 router.get("/:id", getRideRequestById)
 // Passenger: update own request
 router.put("/:id", authGuard, requireVerifiedEmail, updateRide)
