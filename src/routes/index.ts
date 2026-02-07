@@ -9,6 +9,8 @@ import userRoutes from "./user.routes.js"
 import chatRoutes from "./chat.routes.js"
 import fixedRoutePriceRoutes from "./fixedRoutePrice.routes.js"
 import notificationRoutes from "./notification.routes.js"
+import stripeRoutes from "./stripe.routes.js"
+import paymentRoutes from "./payment.routes.js"
 
 export function registerRoutes(app: Express) {
   app.use("/api/auth", authRoutes)
@@ -20,4 +22,6 @@ export function registerRoutes(app: Express) {
   app.use("/api/users", userRoutes)
   app.use("/api/chat", chatRoutes)
   app.use("/api/notifications", notificationRoutes)
+  app.use("/api/stripe", stripeRoutes)
+  app.use("/api/payments", paymentRoutes)
 }

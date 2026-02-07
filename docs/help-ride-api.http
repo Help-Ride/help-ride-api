@@ -13,9 +13,11 @@
 @notificationId =
 @deviceToken =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
+@driverId = 3a81a31f-9d7d-48ed-b512-b16a7b663025
 @email = patel.rishi3001@gmail.com
 @otp = 332576
 @resetOtp = 112233
+@realtimeSecret = replace-with-REALTIME_TO_API_SECRET
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -161,6 +163,27 @@ Accept: application/json
 ###
 
 ################################################
+### 👤 USERS
+################################################
+
+### GET USER PROFILE (PUBLIC)
+GET {{baseUrl}}/users/{{userId}}
+Accept: application/json
+
+###
+
+### UPDATE OWN USER PROFILE
+PUT {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Updated Name"
+}
+
+###
+
+################################################
 ### 🚗 RIDES – DRIVER FLOW
 ################################################
 
@@ -213,6 +236,7 @@ Content-Type: application/json
 ###
 
 ### SEARCH RIDES (PUBLIC)
+# Response includes `rideTiming`: PREBOOKED | ONTIME | STANDARD
 GET {{baseUrl}}/rides?fromCity=Waterloo&toCity=Toronto&seats=1
 Accept: application/json
 
@@ -225,6 +249,7 @@ Accept: application/json
 ###
 
 ### GET MY RIDES  (driver only)
+# Response includes `rideTiming`: PREBOOKED | ONTIME | STANDARD
 GET {{baseUrl}}/rides/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -237,6 +262,7 @@ Accept: application/json
 
 
 ### GET RIDE BY ID
+# Response includes `rideTiming`: PREBOOKED | ONTIME | STANDARD
 GET {{baseUrl}}/rides/{{rideId}}
 Accept: application/json
 
@@ -277,6 +303,13 @@ Accept: application/json
 
 ###
 
+### START RIDE (PUT alias)
+PUT {{baseUrl}}/rides/{{rideId}}/start
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### COMPLETE RIDE
 POST {{baseUrl}}/rides/{{rideId}}/complete
 Authorization: Bearer {{accessToken}}
@@ -284,8 +317,28 @@ Accept: application/json
 
 ###
 
+### COMPLETE RIDE (PUT alias)
+PUT {{baseUrl}}/rides/{{rideId}}/complete
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### CANCEL RIDE (with reason)
+# Refund is initiated for all paid confirmed bookings.
 POST {{baseUrl}}/rides/{{rideId}}/cancel
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Driver unavailable"
+}
+
+###
+
+### CANCEL RIDE (PUT alias)
+# Refund is initiated for all paid confirmed bookings.
+PUT {{baseUrl}}/rides/{{rideId}}/cancel
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -311,7 +364,13 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "seats": 1
+  "seats": 1,
+  "passengerPickupName": "Conestoga Mall, Waterloo",
+  "passengerPickupLat": 43.4723,
+  "passengerPickupLng": -80.5449,
+  "passengerDropoffName": "Union Station, Toronto",
+  "passengerDropoffLat": 43.6532,
+  "passengerDropoffLng": -79.3832
 }
 
 ###
@@ -355,13 +414,31 @@ Accept: application/json
 ###
 
 ### PASSENGER: CANCEL BOOKING
+# If booking was paid, refund is initiated automatically.
 POST {{baseUrl}}/bookings/{{bookingId}}/cancel
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
 
+### PASSENGER: CANCEL BOOKING (PUT alias)
+# If booking was paid, refund is initiated automatically.
+PUT {{baseUrl}}/bookings/{{bookingId}}/cancel
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### PASSENGER: CANCEL BOOKING (DELETE alias)
+# If booking was paid, refund is initiated automatically.
+DELETE {{baseUrl}}/bookings/{{bookingId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### DRIVER: CANCEL PASSENGER BOOKING
+# If booking was paid, refund is initiated automatically.
 POST {{baseUrl}}/bookings/{{bookingId}}/driver-cancel
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -407,6 +484,13 @@ Accept: application/json
 
 ### LIST MESSAGES
 GET {{baseUrl}}/chat/conversations/{{conversationId}}/messages?limit=50
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### MARK MESSAGES READ
+POST {{baseUrl}}/chat/conversations/{{conversationId}}/read
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
@@ -458,6 +542,20 @@ Content-Type: application/json
 
 ###
 
+### DRIVER SUMMARY (RIDES + EARNINGS)
+GET {{baseUrl}}/drivers/me/summary
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
+### DRIVER EARNINGS LEDGER (PAGINATED)
+GET {{baseUrl}}/drivers/me/earnings?status=succeeded&limit=20
+Authorization: Bearer {{driverAccessToken}}
+Accept: application/json
+
+###
+
 ### GET DRIVER PROFILE (by userId)
 GET {{baseUrl}}/drivers/{{userId}}
 Accept: application/json
@@ -476,11 +574,53 @@ Content-Type: application/json
 
 ###
 
+# Set this from GET DRIVER PROFILE response (DriverProfile.id)
+@vehicleId =
+
+### UPDATE VEHICLE (ALIAS, SINGLE VEHICLE)
+PUT {{baseUrl}}/drivers/{{userId}}/vehicles/{{vehicleId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "carColor": "Blue"
+}
+
+###
+
+### DELETE VEHICLE (ALIAS, SINGLE VEHICLE)
+DELETE {{baseUrl}}/drivers/{{userId}}/vehicles/{{vehicleId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
 ################################################
 ### 📌 RIDE REQUESTS (WHEN NO MATCHING RIDES)
 ################################################
 
+### CREATE JIT PAYMENT INTENT (PASSENGER, <= 2 HOURS TO DEPARTURE)
+POST {{baseUrl}}/ride-requests/jit/intent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "preferredDate": "2026-02-02T18:00:00.000Z",
+  "preferredTime": "18:00",
+  "seatsNeeded": 1,
+  "rideType": "one-time",
+  "tripType": "one-way"
+}
+
+###
+
 ### CREATE RIDE REQUEST (PASSENGER, VERIFIED)
+# NOTE: For departures within 2 hours, call /ride-requests/jit/intent first.
 POST {{baseUrl}}/ride-requests
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -502,14 +642,14 @@ Content-Type: application/json
 
 ###
 
-### PUBLIC LIST RIDE REQUESTS (PENDING BY DEFAULT)
+### PUBLIC LIST RIDE REQUESTS (OFFERING/PENDING BY DEFAULT)
 GET {{baseUrl}}/ride-requests?fromCity=Waterloo&toCity=Toronto
 Accept: application/json
 
 ###
 
-### PUBLIC LIST RIDE REQUESTS (GEOLOCATION)
-GET {{baseUrl}}/ride-requests?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25
+### PUBLIC LIST RIDE REQUESTS (PICKUP NEARBY)
+GET {{baseUrl}}/ride-requests?lat=43.4643&lng=-80.5204&radiusKm=25&limit=20
 Accept: application/json
 
 ###
@@ -530,6 +670,12 @@ Accept: application/json
 
 ###
 
+### GET RIDE REQUEST DETAIL (PUBLIC, INCLUDES OFFERS)
+GET {{baseUrl}}/ride-requests/{{rideRequestId}}/detail
+Accept: application/json
+
+###
+
 ### UPDATE OWN RIDE REQUEST
 PUT {{baseUrl}}/ride-requests/{{rideRequestId}}
 Authorization: Bearer {{accessToken}}
@@ -543,9 +689,30 @@ Content-Type: application/json
 
 ###
 
-### DELETE / CANCEL OWN RIDE REQUEST
+### CANCEL OWN RIDE REQUEST
+# NOTE: For JIT requests, this also initiates Stripe refund before cancellation.
+POST {{baseUrl}}/ride-requests/{{rideRequestId}}/cancel
+Authorization: Bearer {{accessToken}}
+
+###
+
+### DELETE / CANCEL OWN RIDE REQUEST (LEGACY ALIAS)
 DELETE {{baseUrl}}/ride-requests/{{rideRequestId}}
 Authorization: Bearer {{accessToken}}
+
+###
+
+### REALTIME ACCEPT CALLBACK (SERVER-TO-SERVER, NO JWT)
+POST {{baseUrl}}/ride-requests/{{rideRequestId}}/accept
+X-REALTIME-SECRET: {{realtimeSecret}}
+Content-Type: application/json
+
+{
+  "driverId": "{{driverId}}",
+  "rideId": "{{rideId}}",
+  "seatsOffered": 1,
+  "pricePerSeat": 20
+}
 
 ###
 
@@ -728,3 +895,38 @@ Content-Type: application/json
 ### DELETE FIXED ROUTE PRICE
 DELETE {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
 Authorization: Bearer {{accessToken}}
+
+################################################
+### 💳 STRIPE PAYMENTS (PHASE 1: PLATFORM COLLECTION)
+################################################
+# Passenger funds go to HelpRide Stripe account.
+# Driver payouts are tracked in DB and settled manually.
+
+### CREATE PAYMENT INTENT (Passenger)
+POST {{baseUrl}}/payments/intent
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "bookingId": "{{bookingId}}"
+}
+
+###
+
+# Set from payment intent response
+@paymentIntentId =
+
+### GET PAYMENT INTENT STATUS (Passenger/Driver)
+GET {{baseUrl}}/payments/intent/{{paymentIntentId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### STRIPE WEBHOOK (LOCAL DEV - RUN IN TERMINAL)
+# stripe listen --forward-to localhost:4000/api/webhooks/stripe
+
+# Card number: 4242 4242 4242 4242
+# Expiry: Any future date (e.g. 12/34)
+# CVC: Any 3 digits (e.g. 123)
+# ZIP / Postal: Any (e.g. A1A1A1 or 12345)

@@ -36,12 +36,18 @@ enum BookingStatus {
   cancelled_by_passenger
   cancelled_by_driver
   completed
+  ACCEPTED
+  PAYMENT_PENDING
+  CONFIRMED
 }
 
 enum PaymentStatus {
   unpaid
   paid
   refunded
+  pending
+  succeeded
+  failed
 }
 
 enum NotificationType {
@@ -69,6 +75,11 @@ enum DriverDocumentStatus {
   rejected
 }
 
+enum RideRequestMode {
+  OFFER
+  JIT
+}
+
 model DriverDocument {
   id        String               @id @default(uuid())
   user      User                 @relation(fields: [userId], references: [id])
@@ -91,6 +102,7 @@ model User {
   roleDefault               RoleDefault      @default(passenger)
   providerAvatarUrl         String?
   emailVerified             Boolean          @default(false)
+  stripeAccountId           String?          @unique
 
   // 🔽 NEW FIELDS FOR EMAIL OTP
   emailVerifyOtp            String?
@@ -110,6 +122,7 @@ model User {
   notifications        Notification[]
   sosEvents            SosEvent[]
   rideRequests         RideRequest[]
+  acceptedRideRequests RideRequest[]     @relation("AcceptedRideRequestDriver")
   rideRequestOffers    RideRequestOffer[]
   driverDocuments      DriverDocument[]
   refreshTokens        RefreshToken[]
@@ -210,6 +223,12 @@ model Booking {
   passenger             User           @relation("PassengerBookings", fields: [passengerId], references: [id])
   passengerId           String
   seatsBooked           Int
+  passengerPickupName   String?
+  passengerPickupLat    Float?
+  passengerPickupLng    Float?
+  passengerDropoffName  String?
+  passengerDropoffLat   Float?
+  passengerDropoffLng   Float?
   status                BookingStatus  @default(pending)
   paymentStatus         PaymentStatus  @default(unpaid)
   stripePaymentIntentId String?
@@ -224,11 +243,15 @@ model Payment {
   id                     String        @id @default(uuid())
   booking                Booking       @relation(fields: [bookingId], references: [id])
   bookingId              String
-  amount                 Decimal       @db.Decimal(10, 2)
+  paymentIntentId        String        @unique
+  amountCents            Int
+  platformFeeCents       Int
   currency               String        @default("cad")
-  stripePaymentIntentId  String
-  status                 PaymentStatus @default(unpaid)
+  status                 PaymentStatus @default(pending)
   createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@index([bookingId])
 }
 
 model Notification {
@@ -293,12 +316,18 @@ model Message {
   sender         User         @relation(fields: [senderId], references: [id])
   senderId       String
   body           String
+  readAt         DateTime?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
 }
 
 enum RideRequestStatus {
+  PENDING
+  OFFERING
+  ACCEPTED
+  CANCELLED
+  EXPIRED
   pending
   matched
   cancelled
@@ -306,6 +335,10 @@ enum RideRequestStatus {
 }
 
 enum RideRequestOfferStatus {
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
   pending
   accepted
   rejected
@@ -316,6 +349,13 @@ model RideRequest {
   id             String            @id @default(uuid())
   passenger      User              @relation(fields: [passengerId], references: [id])
   passengerId    String
+  driver         User?             @relation("AcceptedRideRequestDriver", fields: [driverId], references: [id])
+  driverId       String?
+  mode           RideRequestMode   @default(OFFER)
+  jitPaymentIntentId String?       @unique
+  jitAmountCents Int?
+  jitCurrency    String?
+  quotedPricePerSeat Decimal?      @db.Decimal(10, 2)
 
   fromCity       String
   fromLat        Float
@@ -338,7 +378,7 @@ model RideRequest {
   returnDate     DateTime?
   returnTime     String?
 
-  status         RideRequestStatus @default(pending)
+  status         RideRequestStatus @default(PENDING)
 
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
@@ -348,7 +388,9 @@ model RideRequest {
   @@index([status])
   @@index([fromCity])
   @@index([toCity])
+  @@index([fromLat, fromLng])
   @@index([passengerId])
+  @@index([driverId])
 }
 
 model RideRequestOffer {
@@ -357,16 +399,16 @@ model RideRequestOffer {
   rideRequestId  String
   driver         User                    @relation(fields: [driverId], references: [id])
   driverId       String
-  ride           Ride                    @relation(fields: [rideId], references: [id])
-  rideId         String
+  ride           Ride?                   @relation(fields: [rideId], references: [id])
+  rideId         String?
   seatsOffered   Int
   pricePerSeat   Decimal                 @db.Decimal(10, 2)
-  status         RideRequestOfferStatus  @default(pending)
+  status         RideRequestOfferStatus  @default(SENT)
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
   @@index([rideRequestId])
   @@index([driverId])
   @@index([rideId])
-  @@unique([rideRequestId, driverId, rideId])
+  @@unique([rideRequestId, driverId])
 }

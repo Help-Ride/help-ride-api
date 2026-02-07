@@ -94,6 +94,25 @@ PUSHER_KEY="your-key"
 PUSHER_SECRET="your-secret"
 PUSHER_CLUSTER="your-cluster"
 
+# Stripe
+STRIPE_SECRET_KEY="sk_test_..."
+STRIPE_WEBHOOK_SECRET="whsec_..."
+PAYMENT_PLATFORM_FEE_PCT=0.15
+# Optional backward-compatible alias:
+# STRIPE_PLATFORM_FEE_PCT=0.15
+
+# Realtime dispatch bridge (Fly.io)
+REALTIME_BASE_URL="https://your-realtime-app.fly.dev"
+REALTIME_TO_API_SECRET="rts_xxx"
+# Must match realtime service JWT verification secret:
+# JWT_ACCESS_SECRET="same-value-used-by-realtime-service"
+
+# Optional pricing model overrides (cents / basis points)
+PAYMENT_BASE_FARE_CENTS=0
+PAYMENT_PER_KM_RATE_CENTS=0
+PAYMENT_SERVICE_FEE_CENTS=0
+PAYMENT_TAX_BPS=0
+
 # App
 NODE_ENV="development"        # or "production"
 PORT=4000                     # local dev port
@@ -431,6 +450,30 @@ Used on routes like `/rides`, `/bookings`, `/ride-requests`, `/drivers` (POST).
 
 ---
 
+## Users Module
+
+### Get User Profile (Public)
+
+`GET /api/users/:id`
+
+- Returns safe public fields only (`id`, `name`, `providerAvatarUrl`, `roleDefault`).
+
+### Update User Profile
+
+`PUT /api/users/:id` (JWT – must match current user)
+
+```json
+{
+  "name": "Updated Name",
+  "phone": "+14165551234",
+  "providerAvatarUrl": "https://example.com/avatar.png"
+}
+```
+
+- Partial update of the current user's profile.
+
+---
+
 ## Driver Profile Module
 
 Single-car model for now (one `DriverProfile` per `User`).
@@ -471,6 +514,19 @@ Single-car model for now (one `DriverProfile` per `User`).
 ```
 
 - Partial update of driver profile.
+
+### Update Vehicle (Alias)
+
+`PUT /api/drivers/:userId/vehicles/:vehicleId` (JWT + emailVerified – must match current user)
+
+- Compatibility alias backed by the single `DriverProfile` record.
+- `vehicleId` must equal the driver's `DriverProfile.id`.
+
+### Delete Vehicle (Alias)
+
+`DELETE /api/drivers/:userId/vehicles/:vehicleId` (JWT + emailVerified – must match current user)
+
+- Deletes the driver's `DriverProfile` (blocked if the driver has active rides).
 
 ---
 
@@ -563,11 +619,37 @@ Single-car model for now (one `DriverProfile` per `User`).
 
 - Soft-delete or hard-delete depending on implementation (currently likely hard delete).
 
+### Start Ride (Driver)
+
+`POST /api/rides/:id/start` (JWT + emailVerified – must be driver)
+
+- Transitions ride `status` to `ongoing`.
+
+### Complete Ride (Driver)
+
+`POST /api/rides/:id/complete` (JWT + emailVerified – must be driver)
+
+- Transitions ride `status` to `completed`.
+
+### Cancel Ride (Driver)
+
+`POST /api/rides/:id/cancel` (JWT + emailVerified – must be driver)
+
+- Transitions ride `status` to `cancelled` and initiates refunds for confirmed paid bookings.
+
 ---
 
 ## Ride Requests Module
 
 Used when no matching ride exists and passengers want to post what they need.
+
+### Create JIT Payment Intent
+
+`POST /api/ride-requests/jit/intent` (JWT passenger, emailVerified)
+
+- For departure times within 2 hours.
+- Creates a payment intent first.
+- On successful Stripe webhook, the API creates a `RideRequest` with `mode = "JIT"` and dispatches it to realtime matching.
 
 ### Create Ride Request
 
@@ -592,7 +674,8 @@ Used when no matching ride exists and passengers want to post what they need.
 
 - Validates required fields and ISO dates.
 - For `tripType = "round-trip"`, ensures `returnDate >= preferredDate`.
-- Creates a `RideRequest` with `status = "pending"`.
+- For departures within 2 hours, returns an error and asks you to use `/api/ride-requests/jit/intent`.
+- Creates a regular `RideRequest` with `mode = "OFFER"` and `status = "pending"`.
 
 ### Search Ride Requests (Public)
 
@@ -613,6 +696,21 @@ Used when no matching ride exists and passengers want to post what they need.
 
 - Public read of a single ride request.
 
+### Get Ride Request Detail (Public)
+
+`GET /api/ride-requests/:id/detail`
+
+- Public detail view that includes `offers`.
+
+### Ride Request Offers
+
+- `POST /api/ride-requests/:id/offers` (JWT + emailVerified, driver) – create offer for a request (links an existing `rideId`).
+- `GET /api/ride-requests/:id/offers` (JWT) – passenger sees all offers; driver sees own offers.
+- `PUT /api/ride-requests/:id/offers/:offerId/accept` (JWT + emailVerified, passenger) – accepts offer and creates booking.
+- `PUT /api/ride-requests/:id/offers/:offerId/reject` (JWT + emailVerified, passenger) – rejects offer.
+- `PUT /api/ride-requests/:id/offers/:offerId/cancel` (JWT + emailVerified, driver) – cancels offer.
+- `GET /api/ride-requests/offers/me/list` (JWT, driver) – list driver's offers across requests.
+
 ### Update Ride Request (Passenger)
 
 `PUT /api/ride-requests/:id` (JWT – must be owner)
@@ -627,12 +725,14 @@ Used when no matching ride exists and passengers want to post what they need.
 
 - Partial update of the request fields.
 
-### Cancel Ride Request
+### Cancel Ride Request (Passenger)
 
-`DELETE /api/ride-requests/:id` (JWT – must be owner)
+`POST /api/ride-requests/:id/cancel` (JWT + emailVerified – must be owner)
 
-- Only allowed when `status = "pending"`.
-- Marks it as `cancelled` instead of deleting.
+`DELETE /api/ride-requests/:id` (alias)
+
+- Marks the request as `CANCELLED` and triggers realtime cancellation.
+- For JIT requests, initiates Stripe refund before cancellation.
 
 ---
 
@@ -646,11 +746,17 @@ Passenger booking → driver approval → seats updated.
 
 ```json
 {
-  "seats": 1
+  "seats": 1,
+  "passengerPickupName": "Conestoga Mall, Waterloo",
+  "passengerPickupLat": 43.4723,
+  "passengerPickupLng": -80.5449,
+  "passengerDropoffName": "Union Station, Toronto",
+  "passengerDropoffLat": 43.6532,
+  "passengerDropoffLng": -79.3832
 }
 ```
 
-- Validates ride, seat availability, and user.
+- Validates ride, seat availability, user, and passenger pickup/dropoff names + coordinates.
 - Creates a `Booking` with:
   - `status = "pending"`
   - `paymentStatus = "unpaid"`
@@ -681,7 +787,16 @@ Passenger booking → driver approval → seats updated.
 - Marks `status = "cancelled_by_driver"` for that booking.
 - Does **not** decrement seats.
 
-_Payment integration (Stripe) is planned but not implemented yet – booking/payment linkage is already modeled in `Booking` and `Payment`._
+### Cancel Booking (Passenger)
+
+`POST /api/bookings/:id/cancel` (JWT + emailVerified – must be owner)
+
+`PUT /api/bookings/:id/cancel` (alias)
+
+`DELETE /api/bookings/:id` (alias)
+
+- Marks `status = "cancelled_by_passenger"`.
+- If payment was already completed, initiates Stripe refund automatically.
 
 ---
 
@@ -715,6 +830,15 @@ Passenger ↔ driver chat scoped to a ride, with realtime delivery via Pusher.
 `GET /api/chat/conversations/:id/messages?limit=50&cursor=<messageId>` (JWT)
 
 - Returns newest messages first, plus `nextCursor` for pagination.
+- Each message includes `readAt` (`null` until the recipient marks it read).
+
+### Mark Messages Read
+
+`POST /api/chat/conversations/:id/read` (JWT)
+
+- Marks unread incoming messages in the conversation as read.
+- Returns `readCount`, `readAt`, and `messageIds` for updated messages.
+- Broadcasts `message:read` on the conversation realtime channel.
 
 ### Send Message
 

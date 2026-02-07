@@ -3,12 +3,46 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { notifyUser } from "../lib/notifications.js"
+import { initiateBookingRefundIfPaid } from "../lib/refunds.js"
 
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
 
 interface CreateBookingBody {
   seats?: number
+  passengerPickupName?: string
+  passengerPickupLat?: number
+  passengerPickupLng?: number
+  passengerDropoffName?: string
+  passengerDropoffLat?: number
+  passengerDropoffLng?: number
+}
+
+function parseNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function parseNonEmptyString(value: unknown) {
+  if (typeof value !== "string") {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function isValidLatitude(value: number) {
+  return Number.isFinite(value) && value >= -90 && value <= 90
+}
+
+function isValidLongitude(value: number) {
+  return Number.isFinite(value) && value >= -180 && value <= 180
 }
 
 /**
@@ -22,14 +56,62 @@ export async function createBooking(req: AuthRequest, res: Response) {
     }
 
     const { rideId } = req.params
-    const { seats } = (req.body ?? {}) as CreateBookingBody
+    const {
+      seats,
+      passengerPickupName,
+      passengerPickupLat,
+      passengerPickupLng,
+      passengerDropoffName,
+      passengerDropoffLat,
+      passengerDropoffLng,
+    } = (req.body ?? {}) as CreateBookingBody
 
     const seatsRequested = Number(seats ?? 1)
+    const pickupName = parseNonEmptyString(passengerPickupName)
+    const pickupLat = parseNumber(passengerPickupLat)
+    const pickupLng = parseNumber(passengerPickupLng)
+    const dropoffName = parseNonEmptyString(passengerDropoffName)
+    const dropoffLat = parseNumber(passengerDropoffLat)
+    const dropoffLng = parseNumber(passengerDropoffLng)
+
     if (!rideId) {
       return res.status(400).json({ error: "rideId is required" })
     }
+
     if (!Number.isFinite(seatsRequested) || seatsRequested <= 0) {
       return res.status(400).json({ error: "seats must be a positive integer" })
+    }
+
+    if (!pickupName || !dropoffName) {
+      return res.status(400).json({
+        error: "passengerPickupName and passengerDropoffName are required",
+      })
+    }
+
+    if (
+      pickupLat == null ||
+      pickupLng == null ||
+      dropoffLat == null ||
+      dropoffLng == null
+    ) {
+      return res.status(400).json({
+        error:
+          "passengerPickupLat, passengerPickupLng, passengerDropoffLat, and passengerDropoffLng are required",
+      })
+    }
+
+    if (!isValidLatitude(pickupLat) || !isValidLongitude(pickupLng)) {
+      return res.status(400).json({
+        error:
+          "passengerPickupLat must be between -90 and 90, passengerPickupLng between -180 and 180",
+      })
+    }
+
+    if (!isValidLatitude(dropoffLat) || !isValidLongitude(dropoffLng)) {
+      return res.status(400).json({
+        error:
+          "passengerDropoffLat must be between -90 and 90, passengerDropoffLng between -180 and 180",
+      })
     }
 
     const ride = await prisma.ride.findUnique({
@@ -72,6 +154,12 @@ export async function createBooking(req: AuthRequest, res: Response) {
         rideId: ride.id,
         passengerId: req.userId,
         seatsBooked: seatsRequested,
+        passengerPickupName: pickupName,
+        passengerPickupLat: pickupLat,
+        passengerPickupLng: pickupLng,
+        passengerDropoffName: dropoffName,
+        passengerDropoffLat: dropoffLat,
+        passengerDropoffLng: dropoffLng,
         status: "pending",
       },
       include: {
@@ -263,6 +351,9 @@ export async function getDriverBookingsInbox(req: AuthRequest, res: Response) {
     const allowedStatuses = new Set([
       "pending",
       "confirmed",
+      "ACCEPTED",
+      "PAYMENT_PENDING",
+      "CONFIRMED",
       "cancelled_by_passenger",
       "cancelled_by_driver",
       "completed",
@@ -294,6 +385,12 @@ export async function getDriverBookingsInbox(req: AuthRequest, res: Response) {
       select: {
         id: true,
         seatsBooked: true,
+        passengerPickupName: true,
+        passengerPickupLat: true,
+        passengerPickupLng: true,
+        passengerDropoffName: true,
+        passengerDropoffLat: true,
+        passengerDropoffLng: true,
         status: true,
         paymentStatus: true,
         createdAt: true,
@@ -367,13 +464,44 @@ export async function cancelBookingByPassenger(req: AuthRequest, res: Response) 
       })
     }
 
-    if (!["pending", "confirmed"].includes(booking.status)) {
+    if (
+      ![
+        "pending",
+        "confirmed",
+        "ACCEPTED",
+        "PAYMENT_PENDING",
+        "CONFIRMED",
+      ].includes(booking.status)
+    ) {
       return res.status(400).json({
-        error: "Only pending or confirmed bookings can be cancelled",
+        error: "Only active bookings can be cancelled",
       })
     }
 
-    const shouldRestoreSeats = booking.status === "confirmed"
+    const shouldRestoreSeats = [
+      "confirmed",
+      "ACCEPTED",
+      "PAYMENT_PENDING",
+      "CONFIRMED",
+    ].includes(booking.status)
+
+    try {
+      await initiateBookingRefundIfPaid({
+        bookingId: booking.id,
+        paymentStatus: booking.paymentStatus,
+        stripePaymentIntentId: booking.stripePaymentIntentId,
+        source: "passenger_cancel_booking",
+      })
+    } catch (refundErr) {
+      console.error("Refund initiation failed for passenger cancellation", {
+        bookingId: booking.id,
+        rideId: booking.rideId,
+        err: refundErr,
+      })
+      return res.status(502).json({
+        error: "Unable to initiate refund for this cancellation. Please retry.",
+      })
+    }
 
     const [updatedBooking, updatedRide] = await prisma.$transaction([
       prisma.booking.update({
@@ -479,13 +607,44 @@ export async function cancelBookingByDriver(req: AuthRequest, res: Response) {
       })
     }
 
-    if (!["pending", "confirmed"].includes(booking.status)) {
+    if (
+      ![
+        "pending",
+        "confirmed",
+        "ACCEPTED",
+        "PAYMENT_PENDING",
+        "CONFIRMED",
+      ].includes(booking.status)
+    ) {
       return res.status(400).json({
-        error: "Only pending or confirmed bookings can be cancelled",
+        error: "Only active bookings can be cancelled",
       })
     }
 
-    const shouldRestoreSeats = booking.status === "confirmed"
+    const shouldRestoreSeats = [
+      "confirmed",
+      "ACCEPTED",
+      "PAYMENT_PENDING",
+      "CONFIRMED",
+    ].includes(booking.status)
+
+    try {
+      await initiateBookingRefundIfPaid({
+        bookingId: booking.id,
+        paymentStatus: booking.paymentStatus,
+        stripePaymentIntentId: booking.stripePaymentIntentId,
+        source: "driver_cancel_booking",
+      })
+    } catch (refundErr) {
+      console.error("Refund initiation failed for driver cancellation", {
+        bookingId: booking.id,
+        rideId: booking.rideId,
+        err: refundErr,
+      })
+      return res.status(502).json({
+        error: "Unable to initiate refund for this cancellation. Please retry.",
+      })
+    }
 
     const [updatedBooking, updatedRide] = await prisma.$transaction([
       prisma.booking.update({
@@ -593,7 +752,7 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
 
     if (booking.status !== "pending") {
       return res.status(400).json({
-        error: "Only pending bookings can be confirmed",
+        error: "Only pending bookings can be accepted",
       })
     }
 
@@ -613,7 +772,7 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
       prisma.booking.update({
         where: { id: booking.id },
         data: {
-          status: "confirmed",
+          status: "ACCEPTED",
         },
       }),
       prisma.ride.update({
@@ -630,8 +789,8 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
 
     await notifyUser({
       userId: booking.passengerId,
-      title: "Booking confirmed",
-      body: `${booking.ride.fromCity} → ${booking.ride.toCity} is confirmed`,
+      title: "Booking accepted",
+      body: `${booking.ride.fromCity} → ${booking.ride.toCity} is accepted`,
       type: "ride_update",
       data: {
         bookingId: booking.id,

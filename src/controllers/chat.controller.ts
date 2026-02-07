@@ -347,6 +347,81 @@ export async function sendMessage(req: AuthRequest, res: Response) {
 }
 
 /**
+ * POST /api/chat/conversations/:id/read
+ * Mark unread incoming messages as read for the current user.
+ */
+export async function markConversationMessagesRead(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id: conversationId } = req.params
+    if (!conversationId) {
+      return res.status(400).json({ error: "conversation id is required" })
+    }
+
+    const participantCheck = await ensureParticipant(conversationId, req.userId)
+    if (!participantCheck.ok) {
+      return res.status(401).json({ error: participantCheck.error })
+    }
+
+    const unreadMessages = await prisma.message.findMany({
+      where: {
+        conversationId,
+        senderId: { not: req.userId },
+        readAt: null,
+      },
+      select: { id: true },
+    })
+
+    if (unreadMessages.length === 0) {
+      return res.json({
+        conversationId,
+        readCount: 0,
+        readAt: null,
+        messageIds: [],
+      })
+    }
+
+    const now = new Date()
+
+    await prisma.message.updateMany({
+      where: {
+        id: { in: unreadMessages.map((message) => message.id) },
+        readAt: null,
+      },
+      data: { readAt: now },
+    })
+
+    if (pusherConfigured && pusher) {
+      const pusherClient = pusher
+      const conversationChannel = `private-conversation-${conversationId}`
+
+      await pusherClient.trigger(conversationChannel, "message:read", {
+        conversationId,
+        readerId: req.userId,
+        readAt: now,
+        messageIds: unreadMessages.map((message) => message.id),
+      })
+    }
+
+    return res.json({
+      conversationId,
+      readCount: unreadMessages.length,
+      readAt: now,
+      messageIds: unreadMessages.map((message) => message.id),
+    })
+  } catch (err) {
+    console.error("POST /chat/conversations/:id/read error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
  * POST /api/chat/pusher/auth
  * Body: { socket_id, channel_name }
  */

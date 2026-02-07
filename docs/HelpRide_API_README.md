@@ -294,12 +294,16 @@ Response:
 The API resolves the final per-seat price on create/update using these rules:
 
 1. Fixed route price (if configured)
-2. ONTIME uplift (+30%) if booking is within 2 hours of departure
-3. Minimum price protection (distance ≥ 55 km, seats ≤ 2, price < $20 → $20)
-4. Same-drop ceiling (distance ≥ 50 km → price ≤ $15)
-5. Upper safety cap (price ≤ distance × $0.30)
+2. Ride timing classification based on departure lead time:
+   - `PREBOOKED`: ride created/updated at least 10 hours before departure
+   - `ONTIME`: ride created/updated within 2 hours of departure
+3. ONTIME uplift (+30%) if ride timing is `ONTIME`
+4. Minimum price protection (distance ≥ 55 km, seats ≤ 2, price < $20 → $20)
+5. Same-drop ceiling (same destination and distance ≥ 50 km → price ≤ $15)
+6. Upper safety cap (final price ≤ distance × $0.30)
 
 `pricePerSeat` in requests is treated as the base/desired value before rules apply.
+Ride responses include `rideTiming` (`PREBOOKED`, `ONTIME`, or `STANDARD`) for UI badges.
 
 ---
 
@@ -747,7 +751,7 @@ Response:
     "rideId": "ride-uuid",
     "passengerId": "passenger-uuid",
     "seatsBooked": 1,
-    "status": "confirmed",
+    "status": "ACCEPTED",
     "paymentStatus": "unpaid",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "updatedAt": "2025-01-01T01:00:00.000Z",
@@ -919,6 +923,91 @@ Response:
 
 ---
 
+## 💳 Stripe Payments
+
+Phase 1 uses platform-only collection:
+- Passenger card payments go to the HelpRide Stripe account.
+- Driver payouts are tracked internally and settled manually (e-Transfer/cash/off-platform).
+- Stripe Connect onboarding is disabled.
+
+### Create PaymentIntent (Passenger)
+
+`POST /payments/intent`
+
+```json
+{
+  "bookingId": "booking-uuid"
+}
+```
+
+Response:
+
+```json
+{
+  "clientSecret": "pi_..._secret_...",
+  "paymentIntentId": "pi_...",
+  "amount": 2200,
+  "currency": "cad",
+  "helpRideFeeCents": 330,
+  "driverEarningsCents": 1870
+}
+```
+
+Notes:
+- Booking must be `ACCEPTED`.
+- Amount is computed server-side (distance/seat-based pricing model) and never accepted from client input.
+- If a booking already has a `stripePaymentIntentId`, the existing intent is reused (idempotency).
+- Booking transitions to `PAYMENT_PENDING` after intent creation/reuse.
+- Funds are collected into the HelpRide Stripe account (no direct transfer to driver).
+
+---
+
+### Get PaymentIntent (Debug / Status)
+
+`GET /payments/intent/:id`
+
+Response:
+
+```json
+{
+  "paymentIntentId": "pi_...",
+  "clientSecret": "pi_..._secret_...",
+  "amount": 2200,
+  "currency": "cad",
+  "stripeStatus": "requires_payment_method",
+  "localStatus": "pending",
+  "helpRideFeeCents": 330,
+  "driverEarningsCents": 1870,
+  "bookingId": "booking-uuid",
+  "bookingStatus": "PAYMENT_PENDING",
+  "bookingPaymentStatus": "pending",
+  "rideId": "ride-uuid"
+}
+```
+
+---
+
+### Stripe Webhook
+
+`POST /webhooks/stripe`
+
+Stripe dashboard configuration:
+- Endpoint URL: `/api/webhooks/stripe`
+- Events: `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`
+
+Local forwarding:
+
+```bash
+stripe listen --forward-to localhost:4000/api/webhooks/stripe
+```
+
+Listen for:
+- `payment_intent.succeeded` → booking `CONFIRMED` + payment status `paid`
+- `payment_intent.payment_failed` → booking `ACCEPTED` + payment status `failed`
+- `charge.refunded` → payment status `refunded`
+
+---
+
 ## 🧑‍✈️ Driver Profile
 
 ### Create Driver Profile
@@ -1026,13 +1115,102 @@ Response:
 
 ---
 
+### Driver Summary (Rides + Earnings)
+
+`GET /drivers/me/summary`
+
+Response:
+
+```json
+{
+  "rides": {
+    "total": 14,
+    "completed": 11
+  },
+  "earnings": {
+    "pending": {
+      "paymentsCount": 2,
+      "amountCents": 3800
+    },
+    "paid": {
+      "paymentsCount": 9,
+      "amountCents": 22450
+    },
+    "refunded": {
+      "paymentsCount": 1,
+      "amountCents": 2500
+    },
+    "failed": {
+      "paymentsCount": 1,
+      "amountCents": 0
+    },
+    "netCollectedCents": 19950
+  }
+}
+```
+
+---
+
+### Driver Earnings Ledger (Paginated)
+
+`GET /drivers/me/earnings?status=succeeded&limit=20&cursor=<paymentId>`
+
+Response:
+
+```json
+{
+  "payments": [
+    {
+      "id": "payment-uuid",
+      "paymentIntentId": "pi_...",
+      "amountCents": 2500,
+      "platformFeeCents": 375,
+      "driverEarningsCents": 2125,
+      "currency": "cad",
+      "status": "succeeded",
+      "createdAt": "2026-02-02T00:00:00.000Z",
+      "updatedAt": "2026-02-02T00:02:00.000Z",
+      "booking": {
+        "id": "booking-uuid",
+        "status": "CONFIRMED",
+        "paymentStatus": "paid",
+        "seatsBooked": 1,
+        "passenger": {
+          "id": "passenger-uuid",
+          "name": "Passenger Name",
+          "email": "passenger@example.com"
+        },
+        "ride": {
+          "id": "ride-uuid",
+          "fromCity": "Waterloo",
+          "toCity": "Toronto",
+          "startTime": "2026-02-05T14:00:00.000Z",
+          "status": "completed"
+        }
+      }
+    }
+  ],
+  "nextCursor": "payment-uuid"
+}
+```
+
+---
+
 ## 📌 Ride Requests
 
-Passengers create ride requests; drivers can browse pending requests and offer rides.
+Passengers create ride requests; requests are dispatched to realtime matching and move to `OFFERING`.
+
+Status values:
+- RideRequest: `PENDING`, `OFFERING`, `ACCEPTED`, `CANCELLED`, `EXPIRED`
+- RideRequestOffer: `SENT`, `ACCEPTED`, `REJECTED`, `EXPIRED`
 
 ### Create Ride Request
 
 `POST /ride-requests`
+
+Notes:
+- Pickup coordinates are stored in `fromLat`/`fromLng` and are required.
+- Coordinates must be within valid ranges (lat: -90..90, lng: -180..180).
 
 ```json
 {
@@ -1069,7 +1247,7 @@ Response:
   "tripType": "one-way",
   "returnDate": null,
   "returnTime": null,
-  "status": "pending",
+  "status": "OFFERING",
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z",
   "passenger": {
@@ -1182,51 +1360,62 @@ Response:
 Response:
 
 ```json
-[
-  {
-    "id": "ride-request-uuid",
-    "passengerId": "passenger-uuid",
-    "fromCity": "Waterloo",
-    "toCity": "Toronto",
-    "preferredDate": "2025-12-20T08:00:00.000Z",
-    "seatsNeeded": 1,
-    "status": "pending",
-    "passenger": {
-      "id": "passenger-uuid",
-      "name": "Passenger Name",
-      "email": "passenger@example.com",
-      "providerAvatarUrl": null
+{
+  "requests": [
+    {
+      "id": "ride-request-uuid",
+      "passengerId": "passenger-uuid",
+      "fromCity": "Waterloo",
+      "toCity": "Toronto",
+      "preferredDate": "2025-12-20T08:00:00.000Z",
+      "seatsNeeded": 1,
+      "status": "OFFERING",
+      "passenger": {
+        "id": "passenger-uuid",
+        "name": "Passenger Name",
+        "email": "passenger@example.com",
+        "providerAvatarUrl": null
+      }
     }
-  }
-]
+  ],
+  "nextCursor": "ride-request-uuid"
+}
 ```
 
 ---
 
-### List Ride Requests (Geolocation)
+### List Ride Requests (Pickup Nearby)
 
-`GET /ride-requests?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25`
+`GET /ride-requests?lat=43.4643&lng=-80.5204&radiusKm=25&limit=20`
+
+Notes:
+- `radiusKm` defaults to 25 and is capped at 100.
+- `limit` defaults to 50 (max 100).
+- Use `cursor` (rideRequestId) to fetch the next page.
 
 Response:
 
 ```json
-[
-  {
-    "id": "ride-request-uuid",
-    "passengerId": "passenger-uuid",
-    "fromCity": "Waterloo",
-    "toCity": "Toronto",
-    "preferredDate": "2025-12-20T08:00:00.000Z",
-    "seatsNeeded": 1,
-    "status": "pending",
-    "passenger": {
-      "id": "passenger-uuid",
-      "name": "Passenger Name",
-      "email": "passenger@example.com",
-      "providerAvatarUrl": null
+{
+  "requests": [
+    {
+      "id": "ride-request-uuid",
+      "passengerId": "passenger-uuid",
+      "fromCity": "Waterloo",
+      "toCity": "Toronto",
+      "preferredDate": "2025-12-20T08:00:00.000Z",
+      "seatsNeeded": 1,
+      "status": "OFFERING",
+      "passenger": {
+        "id": "passenger-uuid",
+        "name": "Passenger Name",
+        "email": "passenger@example.com",
+        "providerAvatarUrl": null
+      }
     }
-  }
-]
+  ],
+  "nextCursor": "ride-request-uuid"
+}
 ```
 
 ---
@@ -1245,7 +1434,7 @@ Response:
   "toCity": "Toronto",
   "preferredDate": "2025-12-20T08:00:00.000Z",
   "seatsNeeded": 1,
-  "status": "pending",
+  "status": "OFFERING",
   "passenger": {
     "id": "passenger-uuid",
     "name": "Passenger Name",
@@ -1277,7 +1466,7 @@ Response:
   "preferredTime": "09:30",
   "arrivalTime": "12:00",
   "seatsNeeded": 2,
-  "status": "pending",
+  "status": "OFFERING",
   "updatedAt": "2025-01-01T01:00:00.000Z",
   "passenger": {
     "id": "passenger-uuid",
@@ -1305,7 +1494,7 @@ Response:
     "toCity": "Toronto",
     "preferredDate": "2025-12-20T08:00:00.000Z",
     "seatsNeeded": 1,
-    "status": "pending",
+    "status": "OFFERING",
     "passenger": {
       "id": "passenger-uuid",
       "name": "Passenger Name",
@@ -1318,7 +1507,48 @@ Response:
 
 ---
 
-### Delete Ride Request
+### Cancel Ride Request
+
+`POST /ride-requests/{rideRequestId}/cancel`
+
+Response:
+
+```json
+{
+  "id": "ride-request-uuid",
+  "status": "CANCELLED",
+  "updatedAt": "2025-01-01T01:00:00.000Z"
+}
+```
+
+---
+
+### Realtime Accept Callback (Server-to-Server)
+
+`POST /ride-requests/{rideRequestId}/accept`
+
+Headers:
+- `X-REALTIME-SECRET: <REALTIME_TO_API_SECRET>`
+
+Body:
+
+```json
+{
+  "driverId": "driver-uuid",
+  "rideId": "ride-uuid",
+  "seatsOffered": 1,
+  "pricePerSeat": 22
+}
+```
+
+Notes:
+- This endpoint does **not** use JWT.
+- It is idempotent (duplicate callbacks return success).
+- First accepted callback wins.
+
+---
+
+### Delete Ride Request (Legacy Alias)
 
 `DELETE /ride-requests/{rideRequestId}`
 
@@ -1327,7 +1557,7 @@ Response:
 ```json
 {
   "id": "ride-request-uuid",
-  "status": "cancelled",
+  "status": "CANCELLED",
   "updatedAt": "2025-01-01T01:00:00.000Z"
 }
 ```
@@ -1355,7 +1585,7 @@ Response:
   "rideId": "ride-uuid",
   "seatsOffered": 1,
   "pricePerSeat": 22,
-  "status": "pending",
+  "status": "SENT",
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z"
 }
@@ -1378,7 +1608,7 @@ Response:
     "rideId": "ride-uuid",
     "seatsOffered": 1,
     "pricePerSeat": 22,
-    "status": "pending",
+    "status": "SENT",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "ride": {
       "id": "ride-uuid",
@@ -1413,7 +1643,7 @@ Response:
     "rideId": "ride-uuid",
     "seatsOffered": 1,
     "pricePerSeat": 22,
-    "status": "pending",
+    "status": "SENT",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "rideRequest": {
       "id": "ride-request-uuid",
@@ -1438,7 +1668,7 @@ Response:
 
 `PUT /ride-requests/{rideRequestId}/offers/{offerId}/accept`
 
-Accepting an offer confirms the ride and creates a confirmed booking.
+Accepting an offer accepts the ride and creates an accepted booking.
 
 Response:
 
@@ -1446,18 +1676,18 @@ Response:
 {
   "offer": {
     "id": "offer-uuid",
-    "status": "accepted"
+    "status": "ACCEPTED"
   },
   "rideRequest": {
     "id": "ride-request-uuid",
-    "status": "matched"
+    "status": "ACCEPTED"
   },
   "booking": {
     "id": "booking-uuid",
     "rideId": "ride-uuid",
     "passengerId": "passenger-uuid",
     "seatsBooked": 1,
-    "status": "confirmed",
+    "status": "ACCEPTED",
     "passenger": {
       "id": "passenger-uuid",
       "name": "Passenger Name",
@@ -1498,7 +1728,7 @@ Response:
 ```json
 {
   "id": "offer-uuid",
-  "status": "rejected"
+  "status": "REJECTED"
 }
 ```
 
@@ -1513,7 +1743,7 @@ Response:
 ```json
 {
   "id": "offer-uuid",
-  "status": "cancelled"
+  "status": "EXPIRED"
 }
 ```
 
@@ -1610,6 +1840,7 @@ Response:
       "conversationId": "conversation-uuid",
       "senderId": "passenger-uuid",
       "body": "Hello!",
+      "readAt": null,
       "createdAt": "2025-01-01T02:00:00.000Z",
       "sender": {
         "id": "passenger-uuid",
@@ -1619,6 +1850,23 @@ Response:
     }
   ],
   "nextCursor": "message-uuid"
+}
+```
+
+---
+
+### Mark Messages Read
+
+`POST /chat/conversations/{conversationId}/read`
+
+Response:
+
+```json
+{
+  "conversationId": "conversation-uuid",
+  "readCount": 2,
+  "readAt": "2025-01-01T02:05:00.000Z",
+  "messageIds": ["message-uuid-1", "message-uuid-2"]
 }
 ```
 
@@ -1642,6 +1890,7 @@ Response:
   "conversationId": "conversation-uuid",
   "senderId": "passenger-uuid",
   "body": "Hello!",
+  "readAt": null,
   "createdAt": "2025-01-01T02:00:00.000Z",
   "sender": {
     "id": "passenger-uuid",
@@ -1688,8 +1937,8 @@ Response:
     {
       "id": "notification-uuid",
       "userId": "user-uuid",
-      "title": "Booking confirmed",
-      "body": "Waterloo → Toronto is confirmed",
+      "title": "Booking accepted",
+      "body": "Waterloo → Toronto is accepted",
       "type": "ride_update",
       "isRead": false,
       "createdAt": "2025-01-01T00:00:00.000Z"
@@ -1757,8 +2006,8 @@ Response:
 {
   "id": "notification-uuid",
   "userId": "user-uuid",
-  "title": "Booking confirmed",
-  "body": "Waterloo → Toronto is confirmed",
+  "title": "Booking accepted",
+  "body": "Waterloo → Toronto is accepted",
   "type": "ride_update",
   "isRead": true,
   "createdAt": "2025-01-01T00:00:00.000Z"
@@ -1888,6 +2137,14 @@ NODE_ENV=development
 FIREBASE_PROJECT_ID=...
 FIREBASE_CLIENT_EMAIL=...
 FIREBASE_PRIVATE_KEY=...
+STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+PAYMENT_PLATFORM_FEE_PCT=0.15
+# optional backward-compatible alias:
+# STRIPE_PLATFORM_FEE_PCT=0.15
+REALTIME_BASE_URL=https://your-realtime-app.fly.dev
+REALTIME_TO_API_SECRET=rts_xxx
+# JWT_ACCESS_SECRET must match your Fly.io realtime service
 ```
 
 ---

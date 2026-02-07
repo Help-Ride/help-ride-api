@@ -2,8 +2,9 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { resolveSeatPrice } from "../lib/pricing.js"
+import { classifyRideTimingByDeparture, resolveSeatPrice } from "../lib/pricing.js"
 import { notifyUser, notifyUsersByRole } from "../lib/notifications.js"
+import { initiateBookingRefundIfPaid } from "../lib/refunds.js"
 
 interface CreateRideBody {
   fromCity: string
@@ -15,6 +16,13 @@ interface CreateRideBody {
   startTime: string // ISO string from client
   pricePerSeat: number
   seatsTotal: number
+}
+
+function attachRideTiming<T extends { startTime: Date }>(ride: T) {
+  return {
+    ...ride,
+    rideTiming: classifyRideTimingByDeparture(ride.startTime),
+  }
 }
 
 /**
@@ -108,7 +116,7 @@ export async function createRide(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.status(201).json(ride)
+    return res.status(201).json(attachRideTiming(ride))
   } catch (err) {
     console.error("POST /api/rides error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -287,7 +295,7 @@ export async function searchRides(req: AuthRequest, res: Response) {
       )
     }
 
-    return res.json(rides)
+    return res.json(rides.map(attachRideTiming))
   } catch (err) {
     console.error("GET /api/rides error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -348,7 +356,7 @@ export async function getMyRides(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.json(rides)
+    return res.json(rides.map(attachRideTiming))
   } catch (err) {
     console.error("GET /api/rides/mine error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -391,7 +399,7 @@ export async function getRideById(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: "Ride not found" })
     }
 
-    return res.json(ride)
+    return res.json(attachRideTiming(ride))
   } catch (err) {
     console.error("GET /api/rides/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -473,7 +481,7 @@ export async function updateRide(req: AuthRequest, res: Response) {
       data: updateData,
     })
 
-    return res.json(updatedRide)
+    return res.json(attachRideTiming(updatedRide))
   } catch (err) {
     console.error("PATCH /api/rides/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -512,6 +520,28 @@ export async function deleteRide(req: AuthRequest, res: Response) {
   }
 }
 
+async function getUnpaidBlockingBookings(rideId: string) {
+  const bookings = await prisma.booking.findMany({
+    where: {
+      rideId,
+      status: { in: ["ACCEPTED", "PAYMENT_PENDING", "CONFIRMED", "confirmed"] },
+    },
+    select: {
+      id: true,
+      status: true,
+      paymentStatus: true,
+    },
+  })
+
+  return bookings.filter((booking) => {
+    if (booking.status === "ACCEPTED" || booking.status === "PAYMENT_PENDING") {
+      return true
+    }
+
+    return !["paid", "succeeded"].includes(booking.paymentStatus)
+  })
+}
+
 /**
  * POST /api/rides/:id/start
  * Driver starts ride
@@ -540,8 +570,16 @@ export async function startRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Only open rides can be started" })
     }
 
+    const unpaidBookings = await getUnpaidBlockingBookings(id)
+    if (unpaidBookings.length > 0) {
+      return res.status(400).json({
+        error: "Cannot start ride until all accepted bookings are paid",
+        unpaidBookingIds: unpaidBookings.map((booking) => booking.id),
+      })
+    }
+
     const bookings = await prisma.booking.findMany({
-      where: { rideId: id, status: "confirmed" },
+      where: { rideId: id, status: { in: ["CONFIRMED", "confirmed"] } },
       select: { id: true, passengerId: true },
     })
 
@@ -603,8 +641,16 @@ export async function completeRide(req: AuthRequest, res: Response) {
         .json({ error: "Only ongoing rides can be completed" })
     }
 
+    const unpaidBookings = await getUnpaidBlockingBookings(id)
+    if (unpaidBookings.length > 0) {
+      return res.status(400).json({
+        error: "Cannot complete ride until all accepted bookings are paid",
+        unpaidBookingIds: unpaidBookings.map((booking) => booking.id),
+      })
+    }
+
     const bookings = await prisma.booking.findMany({
-      where: { rideId: id, status: "confirmed" },
+      where: { rideId: id, status: { in: ["CONFIRMED", "confirmed"] } },
       select: { id: true, passengerId: true },
     })
 
@@ -614,7 +660,7 @@ export async function completeRide(req: AuthRequest, res: Response) {
         data: { status: "completed" },
       }),
       prisma.booking.updateMany({
-        where: { rideId: id, status: "confirmed" },
+        where: { rideId: id, status: { in: ["CONFIRMED", "confirmed"] } },
         data: { status: "completed" },
       }),
     ])
@@ -673,9 +719,45 @@ export async function cancelRide(req: AuthRequest, res: Response) {
     }
 
     const bookings = await prisma.booking.findMany({
-      where: { rideId: id, status: { in: ["pending", "confirmed"] } },
-      select: { id: true, passengerId: true },
+      where: {
+        rideId: id,
+        status: {
+          in: ["pending", "confirmed", "ACCEPTED", "PAYMENT_PENDING", "CONFIRMED"],
+        },
+      },
+      select: {
+        id: true,
+        passengerId: true,
+        status: true,
+        paymentStatus: true,
+        stripePaymentIntentId: true,
+      },
     })
+
+    const confirmedBookings = bookings.filter((booking) =>
+      ["CONFIRMED", "confirmed"].includes(booking.status)
+    )
+
+    try {
+      await Promise.all(
+        confirmedBookings.map((booking) =>
+          initiateBookingRefundIfPaid({
+            bookingId: booking.id,
+            paymentStatus: booking.paymentStatus,
+            stripePaymentIntentId: booking.stripePaymentIntentId,
+            source: "driver_cancel_ride",
+          })
+        )
+      )
+    } catch (refundErr) {
+      console.error("Refund initiation failed for ride cancellation", {
+        rideId: id,
+        err: refundErr,
+      })
+      return res.status(502).json({
+        error: "Unable to initiate refunds for confirmed bookings. Please retry.",
+      })
+    }
 
     const [updatedRide, updatedBookings] = await prisma.$transaction([
       prisma.ride.update({
@@ -685,7 +767,15 @@ export async function cancelRide(req: AuthRequest, res: Response) {
       prisma.booking.updateMany({
         where: {
           rideId: id,
-          status: { in: ["pending", "confirmed"] },
+          status: {
+            in: [
+              "pending",
+              "confirmed",
+              "ACCEPTED",
+              "PAYMENT_PENDING",
+              "CONFIRMED",
+            ],
+          },
         },
         data: { status: "cancelled_by_driver" },
       }),

@@ -10,6 +10,38 @@ interface UpdateUserBody {
 }
 
 /**
+ * GET /api/users/:id
+ * Public user profile (safe fields only).
+ */
+export async function getUserById(req: AuthRequest, res: Response) {
+  try {
+    const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: "id is required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        providerAvatarUrl: true,
+        roleDefault: true,
+      },
+    })
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    return res.json(user)
+  } catch (err) {
+    console.error("GET /users/:id error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
  * PUT /api/users/:id
  * Authenticated user can update **their own** profile.
  */
