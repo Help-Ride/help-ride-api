@@ -1,5 +1,6 @@
 // src/controllers/user.controller.ts
 import type { Response } from "express"
+import bcrypt from "bcryptjs"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 
@@ -7,6 +8,11 @@ interface UpdateUserBody {
   name?: string
   phone?: string
   providerAvatarUrl?: string
+}
+
+interface ChangePasswordBody {
+  currentPassword?: string
+  newPassword?: string
 }
 
 /**
@@ -95,6 +101,60 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
     return res.json(updated)
   } catch (err) {
     console.error("PUT /users/:id error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * PUT /api/users/me/password
+ * Authenticated user can change **their own** password.
+ */
+export async function changeUserPassword(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { currentPassword, newPassword } = (req.body ??
+      {}) as ChangePasswordBody
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        error: "currentPassword and newPassword are required",
+      })
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        error: "Password must be at least 8 characters long",
+      })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { id: true, passwordHash: true },
+    })
+
+    if (!user || !user.passwordHash) {
+      return res.status(400).json({
+        error: "Password change is not available for this account",
+      })
+    }
+
+    const isValid = await bcrypt.compare(currentPassword, user.passwordHash)
+    if (!isValid) {
+      return res.status(400).json({ error: "Invalid current password" })
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    })
+
+    return res.status(200).json({ message: "Password updated successfully." })
+  } catch (err) {
+    console.error("PUT /users/:id/password error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
