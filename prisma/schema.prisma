@@ -130,6 +130,7 @@ model User {
   driverConversations    Conversation[] @relation("DriverConversations")
   messages               Message[]
   deviceTokens           DeviceToken[]
+  supportTickets         SupportTicket[]
 }
 
 model OAuthAccount {
@@ -345,6 +346,13 @@ enum RideRequestOfferStatus {
   cancelled
 }
 
+enum SupportTicketStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
 model RideRequest {
   id             String            @id @default(uuid())
   passenger      User              @relation(fields: [passengerId], references: [id])
@@ -411,4 +419,27 @@ model RideRequestOffer {
   @@index([driverId])
   @@index([rideId])
   @@unique([rideRequestId, driverId])
+}
+
+model SupportTicket {
+  id            String              @id @default(uuid())
+  user          User                @relation(fields: [userId], references: [id])
+  userId        String
+  subject       String
+  description   String
+  status        SupportTicketStatus @default(open)
+  adminResponse String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model AppConfig {
+  id                 String   @id @default("global")
+  maintenanceMode    Boolean  @default(false)
+  maintenanceMessage String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
