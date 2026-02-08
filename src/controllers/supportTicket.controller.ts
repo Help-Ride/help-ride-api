@@ -1,4 +1,5 @@
 import type { Response } from "express"
+import type { SupportTicketStatus } from "../generated/prisma/enums.js"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 
@@ -67,13 +68,13 @@ export async function listSupportTickets(req: AuthRequest, res: Response) {
     )
     const cursor = typeof req.query.cursor === "string" ? req.query.cursor : null
 
-    const tickets = await prisma.supportTicket.findMany({
-      where: {
-        userId: req.userId,
-        ...(statusParam ? { status: statusParam } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: Number.isFinite(limit) ? limit : DEFAULT_PAGE_SIZE,
+	    const tickets = await prisma.supportTicket.findMany({
+	      where: {
+	        userId: req.userId,
+	        ...(statusParam ? { status: statusParam as SupportTicketStatus } : {}),
+	      },
+	      orderBy: { createdAt: "desc" },
+	      take: Number.isFinite(limit) ? limit : DEFAULT_PAGE_SIZE,
       ...(cursor
         ? {
             cursor: { id: cursor },

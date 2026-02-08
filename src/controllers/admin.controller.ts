@@ -1,4 +1,5 @@
 import type { Request, Response } from "express"
+import type { SupportTicketStatus } from "../generated/prisma/enums.js"
 import prisma from "../lib/prisma.js"
 
 const DEFAULT_PAGE_SIZE = 50
@@ -34,11 +35,11 @@ export async function listSupportTicketsAdmin(req: Request, res: Response) {
     )
     const cursor = typeof req.query.cursor === "string" ? req.query.cursor : null
 
-    const tickets = await prisma.supportTicket.findMany({
-      where: {
-        ...(statusParam ? { status: statusParam } : {}),
-        ...(userId ? { userId } : {}),
-      },
+	    const tickets = await prisma.supportTicket.findMany({
+	      where: {
+	        ...(statusParam ? { status: statusParam as SupportTicketStatus } : {}),
+	        ...(userId ? { userId } : {}),
+	      },
       orderBy: { createdAt: "desc" },
       take: Number.isFinite(limit) ? limit : DEFAULT_PAGE_SIZE,
       ...(cursor
@@ -92,15 +93,15 @@ export async function updateSupportTicketAdmin(req: Request, res: Response) {
       return res.status(404).json({ error: "Ticket not found" })
     }
 
-    const updated = await prisma.supportTicket.update({
-      where: { id },
-      data: {
-        ...(status ? { status } : {}),
-        ...(typeof adminResponse !== "undefined"
-          ? { adminResponse }
-          : {}),
-      },
-    })
+	    const updated = await prisma.supportTicket.update({
+	      where: { id },
+	      data: {
+	        ...(status ? { status: status as SupportTicketStatus } : {}),
+	        ...(typeof adminResponse !== "undefined"
+	          ? { adminResponse }
+	          : {}),
+	      },
+	    })
 
     return res.json(updated)
   } catch (err) {
