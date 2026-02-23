@@ -28,6 +28,19 @@ Accept: application/json
 ###
 
 ################################################
+### 📚 API DOCS / ENDPOINT TESTER
+################################################
+GET {{baseUrl}}/docs
+Accept: text/html
+
+###
+
+GET {{baseUrl}}/docs/openapi.json
+Accept: application/json
+
+###
+
+################################################
 ### 🔐 AUTH – EMAIL/PASSWORD + OTP
 ################################################
 
