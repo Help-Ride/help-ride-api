@@ -2080,10 +2080,12 @@ Response:
     "fileName": "avatar.png",
     "mimeType": "image/png",
     "s3Key": "users/user-uuid/avatar/avatar-uuid-avatar.png",
-    "url": "https://bucket.s3.amazonaws.com/users/user-uuid/avatar/avatar-uuid-avatar.png"
+    "url": "https://api.example.com/api/users/user-uuid/avatar?key=users%2Fuser-uuid%2Favatar%2Favatar-uuid-avatar.png"
   }
 }
 ```
+
+`avatar.url` is a backend redirect URL that issues a short-lived signed S3 URL, so it works even when the bucket is private.
 
 ---
 

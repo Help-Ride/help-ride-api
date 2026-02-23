@@ -865,7 +865,7 @@ Content-Type: application/json
 
 ###
 
-### UPLOAD MY PROFILE PHOTO (PRESIGN + SAVE URL)
+### UPLOAD MY PROFILE PHOTO (PRESIGN + PRIVATE-BUCKET-SAFE AVATAR URL)
 POST {{baseUrl}}/users/{{userId}}/avatar/presign
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

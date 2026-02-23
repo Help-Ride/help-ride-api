@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs"
 import { randomUUID } from "crypto"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { getPublicFileUrl, getUploadUrl } from "../lib/s3.js"
+import { getDownloadUrl, getUploadUrl } from "../lib/s3.js"
 
 interface UpdateUserBody {
   name?: string
@@ -48,6 +48,21 @@ function isValidLongitude(value: number) {
   return Number.isFinite(value) && value >= -180 && value <= 180
 }
 
+function buildAvatarProxyUrl(req: AuthRequest, userId: string, s3Key: string) {
+  const forwardedProto = req.header("x-forwarded-proto")?.split(",")[0]?.trim()
+  const forwardedHost = req.header("x-forwarded-host")?.split(",")[0]?.trim()
+  const protocol = forwardedProto || req.protocol
+  const host = forwardedHost || req.get("host")
+  const encodedKey = encodeURIComponent(s3Key)
+  const path = `/api/users/${userId}/avatar?key=${encodedKey}`
+
+  if (!host) {
+    return path
+  }
+
+  return `${protocol}://${host}${path}`
+}
+
 /**
  * POST /api/users/:id/avatar/presign
  * Returns a presigned upload URL and updates providerAvatarUrl.
@@ -89,7 +104,7 @@ export async function createUserAvatarPresign(req: AuthRequest, res: Response) {
       key: s3Key,
       contentType: mimeType,
     })
-    const avatarUrl = getPublicFileUrl(s3Key)
+    const avatarUrl = buildAvatarProxyUrl(req, req.userId, s3Key)
 
     const user = await prisma.user.update({
       where: { id: req.userId },
@@ -111,6 +126,44 @@ export async function createUserAvatarPresign(req: AuthRequest, res: Response) {
     })
   } catch (err) {
     console.error("POST /users/:id/avatar/presign error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * GET /api/users/:id/avatar?key=...
+ * Redirects to a short-lived signed download URL for private S3 objects.
+ */
+export async function getUserAvatar(req: AuthRequest, res: Response) {
+  try {
+    const { id } = req.params
+    const key = typeof req.query.key === "string" ? req.query.key : ""
+
+    if (!id) {
+      return res.status(400).json({ error: "id is required" })
+    }
+    if (!key) {
+      return res.status(400).json({ error: "key is required" })
+    }
+    if (!key.startsWith(`users/${id}/avatar/`)) {
+      return res.status(400).json({ error: "Invalid avatar key" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, providerAvatarUrl: true },
+    })
+    if (!user || !user.providerAvatarUrl) {
+      return res.status(404).json({ error: "Avatar not found" })
+    }
+    if (!user.providerAvatarUrl.includes(encodeURIComponent(key))) {
+      return res.status(404).json({ error: "Avatar not found" })
+    }
+
+    const downloadUrl = await getDownloadUrl(key)
+    return res.redirect(302, downloadUrl)
+  } catch (err) {
+    console.error("GET /users/:id/avatar error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

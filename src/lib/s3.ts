@@ -8,7 +8,6 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 const bucket = process.env.AWS_S3_BUCKET
 const region = process.env.AWS_REGION || "us-east-1"
-const publicBaseUrl = process.env.AWS_S3_PUBLIC_BASE_URL?.replace(/\/+$/, "")
 
 if (!bucket) {
   throw new Error("AWS_S3_BUCKET is not set")
@@ -41,21 +40,4 @@ export async function getDownloadUrl(key: string, expiresInSeconds = 900) {
   return getSignedUrl(s3, command, {
     expiresIn: expiresInSeconds,
   })
-}
-
-export function getPublicFileUrl(key: string) {
-  const encodedKey = key
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")
-
-  if (publicBaseUrl) {
-    return `${publicBaseUrl}/${encodedKey}`
-  }
-
-  if (region === "us-east-1") {
-    return `https://${bucket}.s3.amazonaws.com/${encodedKey}`
-  }
-
-  return `https://${bucket}.s3.${region}.amazonaws.com/${encodedKey}`
 }
