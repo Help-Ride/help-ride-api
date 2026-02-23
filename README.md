@@ -584,12 +584,17 @@ Single-car model for now (one `DriverProfile` per `User`).
   "toLng": -79.3832,
   "startTime": "2025-12-15T14:00:00.000Z",
   "arrivalTime": "2025-12-15T16:30:00.000Z",
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["ac", "wifi", "music"],
+  "additionalNotes": "Pickup near the front entrance",
   "pricePerSeat": 20.5,
   "seatsTotal": 3
 }
 ```
 
-- Validates coordinates, start time, and optional `arrivalTime`.
+- Optional fields: `arrivalTime`, `stops`, `amenities`, `additionalNotes`.
+- Allowed `amenities`: `ac`, `music`, `wifi`, `pet_friendly`, `luggage_space`, `child_seat`.
+- Validates coordinates, start time, seat/price values, and optional fields.
 - Ensures `arrivalTime > startTime` when provided.
 - Initializes `seatsAvailable = seatsTotal` and `status = "open"`.
 
@@ -618,6 +623,9 @@ Single-car model for now (one `DriverProfile` per `User`).
 
 ```json
 {
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["wifi", "pet_friendly"],
+  "additionalNotes": "Luggage space available",
   "startTime": "2025-12-15T15:00:00.000Z",
   "arrivalTime": "2025-12-15T17:00:00.000Z",
   "pricePerSeat": 22.5
@@ -625,7 +633,12 @@ Single-car model for now (one `DriverProfile` per `User`).
 ```
 
 - Validates times and allows updating `arrivalTime` (or clearing it by sending `null` / empty string).
-- Leaves `seatsAvailable` unchanged for now (can be improved later).
+- Allows clearing optional fields with `null`:
+  - `arrivalTime: null`
+  - `stops: null` (clears to empty array)
+  - `amenities: null` (clears to empty array)
+  - `additionalNotes: null`
+- If `seatsTotal` is updated, `seatsAvailable` is adjusted with bounds (`0..seatsTotal`).
 
 ### Delete Ride
 

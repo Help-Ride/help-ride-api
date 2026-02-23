@@ -30,6 +30,15 @@ enum RideStatus {
   cancelled
 }
 
+enum RideAmenity {
+  ac
+  music
+  wifi
+  pet_friendly
+  luggage_space
+  child_seat
+}
+
 enum BookingStatus {
   pending
   confirmed
@@ -192,6 +201,9 @@ model Ride {
   toLng           Float
   startTime       DateTime
   arrivalTime     DateTime?
+  stops           String[]     @default([])
+  amenities       RideAmenity[] @default([])
+  additionalNotes String?
   pricePerSeat    Decimal      @db.Decimal(10, 2)
   seatsTotal      Int
   seatsAvailable  Int

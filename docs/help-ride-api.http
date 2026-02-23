@@ -233,10 +233,11 @@ Content-Type: application/json
   "toLng": -79.3832,
   "startTime": "2025-12-20T08:00:00.000Z",
   "arrivalTime": "2025-12-21T08:00:00.000Z",
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["ac", "wifi", "music"],
+  "additionalNotes": "Pickup near front entrance",
   "seatsTotal": 1,
-  "rideType": "one-time",
-  "tripType": "one-way",
-  "pricePerSeat":22
+  "pricePerSeat": 22
 }
 
 ###
@@ -257,10 +258,11 @@ Content-Type: application/json
   "toLng": -79.3832,
   "startTime": "2025-12-20T08:00:00.000Z",
   "arrivalTime": "2025-12-21T08:00:00.000Z",
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["wifi", "pet_friendly"],
+  "additionalNotes": "Luggage space available",
   "seatsTotal": 1,
-  "rideType": "one-time",
-  "tripType": "one-way",
-  "pricePerSeat":22
+  "pricePerSeat": 22
 }
 
 ###
@@ -311,6 +313,10 @@ Content-Type: application/json
   "toLat": 43.6532,
   "toLng": -79.3832,
   "startTime": "2025-12-15T15:00:00.000Z",
+  "arrivalTime": "2025-12-15T17:00:00.000Z",
+  "stops": ["Union Station"],
+  "amenities": ["wifi", "child_seat"],
+  "additionalNotes": "One small luggage allowed",
   "pricePerSeat": 22.5,
   "seatsTotal": 4
 }

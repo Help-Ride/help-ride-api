@@ -14,8 +14,116 @@ interface CreateRideBody {
   toLat: number
   toLng: number
   startTime: string // ISO string from client
+  arrivalTime?: string | null
+  stops?: string[] | null
+  amenities?: RideAmenity[] | null
+  additionalNotes?: string | null
   pricePerSeat: number
   seatsTotal: number
+}
+
+const RIDE_AMENITIES = [
+  "ac",
+  "music",
+  "wifi",
+  "pet_friendly",
+  "luggage_space",
+  "child_seat",
+] as const
+
+type RideAmenity = (typeof RIDE_AMENITIES)[number]
+
+const RIDE_AMENITY_SET = new Set<string>(RIDE_AMENITIES)
+
+function parseArrivalTime(
+  value: unknown,
+  startTime: Date
+): { arrivalTime: Date | null } | { error: string } {
+  if (value == null || value === "") {
+    return { arrivalTime: null }
+  }
+
+  if (typeof value !== "string") {
+    return { error: "arrivalTime must be a valid ISO date string" }
+  }
+
+  const arrival = new Date(value)
+  if (Number.isNaN(arrival.getTime())) {
+    return { error: "arrivalTime must be a valid ISO date string" }
+  }
+
+  if (arrival <= startTime) {
+    return { error: "arrivalTime must be later than startTime" }
+  }
+
+  return { arrivalTime: arrival }
+}
+
+function parseStops(
+  value: unknown
+): { stops: string[] } | { error: string } {
+  if (value == null) {
+    return { stops: [] }
+  }
+
+  if (!Array.isArray(value) || !value.every((stop) => typeof stop === "string")) {
+    return { error: "stops must be an array of strings" }
+  }
+
+  const stops = value.map((stop) => stop.trim()).filter((stop) => stop.length > 0)
+  return { stops }
+}
+
+function parseAmenities(
+  value: unknown
+): { amenities: RideAmenity[] } | { error: string } {
+  if (value == null) {
+    return { amenities: [] }
+  }
+
+  if (
+    !Array.isArray(value) ||
+    !value.every((amenity) => typeof amenity === "string")
+  ) {
+    return { error: "amenities must be an array of strings" }
+  }
+
+  const normalizedAmenities = Array.from(
+    new Set(
+      value
+        .map((amenity) => amenity.trim().toLowerCase())
+        .filter((amenity) => amenity.length > 0)
+    )
+  )
+
+  const invalidAmenities = normalizedAmenities.filter(
+    (amenity) => !RIDE_AMENITY_SET.has(amenity)
+  )
+
+  if (invalidAmenities.length > 0) {
+    return {
+      error: `Invalid amenities: ${invalidAmenities.join(", ")}. Allowed values: ${RIDE_AMENITIES.join(", ")}`,
+    }
+  }
+
+  return {
+    amenities: normalizedAmenities as RideAmenity[],
+  }
+}
+
+function parseAdditionalNotes(
+  value: unknown
+): { additionalNotes: string | null } | { error: string } {
+  if (value == null) {
+    return { additionalNotes: null }
+  }
+
+  if (typeof value !== "string") {
+    return { error: "additionalNotes must be a string" }
+  }
+
+  const notes = value.trim()
+  return { additionalNotes: notes.length > 0 ? notes : null }
 }
 
 function attachRideTiming<T extends { startTime: Date }>(ride: T) {
@@ -44,6 +152,10 @@ export async function createRide(req: AuthRequest, res: Response) {
       toLat,
       toLng,
       startTime,
+      arrivalTime,
+      stops,
+      amenities,
+      additionalNotes,
       pricePerSeat,
       seatsTotal,
     } = (req.body ?? {}) as Partial<CreateRideBody>
@@ -63,8 +175,23 @@ export async function createRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Missing required fields" })
     }
 
+    if (
+      !Number.isFinite(fromLat) ||
+      !Number.isFinite(fromLng) ||
+      !Number.isFinite(toLat) ||
+      !Number.isFinite(toLng)
+    ) {
+      return res.status(400).json({ error: "Coordinates must be valid numbers" })
+    }
+
     if (seatsTotal <= 0) {
       return res.status(400).json({ error: "seatsTotal must be > 0" })
+    }
+    if (!Number.isInteger(seatsTotal)) {
+      return res.status(400).json({ error: "seatsTotal must be an integer" })
+    }
+    if (!Number.isFinite(pricePerSeat)) {
+      return res.status(400).json({ error: "pricePerSeat must be a valid number" })
     }
     if (pricePerSeat < 0) {
       return res.status(400).json({ error: "pricePerSeat must be >= 0" })
@@ -73,6 +200,26 @@ export async function createRide(req: AuthRequest, res: Response) {
     const start = new Date(startTime)
     if (Number.isNaN(start.getTime())) {
       return res.status(400).json({ error: "Invalid startTime" })
+    }
+
+    const arrivalTimeResult = parseArrivalTime(arrivalTime, start)
+    if ("error" in arrivalTimeResult) {
+      return res.status(400).json({ error: arrivalTimeResult.error })
+    }
+
+    const stopsResult = parseStops(stops)
+    if ("error" in stopsResult) {
+      return res.status(400).json({ error: stopsResult.error })
+    }
+
+    const amenitiesResult = parseAmenities(amenities)
+    if ("error" in amenitiesResult) {
+      return res.status(400).json({ error: amenitiesResult.error })
+    }
+
+    const additionalNotesResult = parseAdditionalNotes(additionalNotes)
+    if ("error" in additionalNotesResult) {
+      return res.status(400).json({ error: additionalNotesResult.error })
     }
 
     const pricing = await resolveSeatPrice({
@@ -97,6 +244,10 @@ export async function createRide(req: AuthRequest, res: Response) {
         toLat,
         toLng,
         startTime: start,
+        arrivalTime: arrivalTimeResult.arrivalTime,
+        stops: stopsResult.stops,
+        amenities: amenitiesResult.amenities,
+        additionalNotes: additionalNotesResult.additionalNotes,
         pricePerSeat: pricing.pricePerSeat,
         seatsTotal,
         seatsAvailable: seatsTotal,
@@ -432,6 +583,30 @@ export async function updateRide(req: AuthRequest, res: Response) {
 
     const updates = req.body as Partial<CreateRideBody>
 
+    if (updates.seatsTotal != null) {
+      if (!Number.isInteger(updates.seatsTotal) || updates.seatsTotal <= 0) {
+        return res.status(400).json({ error: "seatsTotal must be a positive integer" })
+      }
+    }
+
+    if (updates.pricePerSeat != null) {
+      if (!Number.isFinite(updates.pricePerSeat)) {
+        return res.status(400).json({ error: "pricePerSeat must be a valid number" })
+      }
+      if (updates.pricePerSeat < 0) {
+        return res.status(400).json({ error: "pricePerSeat must be >= 0" })
+      }
+    }
+
+    if (
+      (updates.fromLat != null && !Number.isFinite(updates.fromLat)) ||
+      (updates.fromLng != null && !Number.isFinite(updates.fromLng)) ||
+      (updates.toLat != null && !Number.isFinite(updates.toLat)) ||
+      (updates.toLng != null && !Number.isFinite(updates.toLng))
+    ) {
+      return res.status(400).json({ error: "Coordinates must be valid numbers" })
+    }
+
     // Prepare update data
     const updateData: any = {
       ...(updates.fromCity && { fromCity: updates.fromCity }),
@@ -440,10 +615,64 @@ export async function updateRide(req: AuthRequest, res: Response) {
       ...(updates.toCity && { toCity: updates.toCity }),
       ...(updates.toLat != null && { toLat: updates.toLat }),
       ...(updates.toLng != null && { toLng: updates.toLng }),
-      ...(updates.startTime && { startTime: new Date(updates.startTime) }),
       ...(updates.pricePerSeat != null && {
         pricePerSeat: updates.pricePerSeat,
       }),
+    }
+
+    let effectiveStartTime = ride.startTime
+    if (updates.startTime !== undefined) {
+      if (typeof updates.startTime !== "string") {
+        return res.status(400).json({ error: "startTime must be a valid ISO date string" })
+      }
+
+      const start = new Date(updates.startTime)
+      if (Number.isNaN(start.getTime())) {
+        return res.status(400).json({ error: "Invalid startTime" })
+      }
+
+      effectiveStartTime = start
+      updateData.startTime = start
+    }
+
+    if (updates.arrivalTime !== undefined) {
+      const arrivalTimeResult = parseArrivalTime(updates.arrivalTime, effectiveStartTime)
+      if ("error" in arrivalTimeResult) {
+        return res.status(400).json({ error: arrivalTimeResult.error })
+      }
+
+      updateData.arrivalTime = arrivalTimeResult.arrivalTime
+    } else if (updates.startTime !== undefined && ride.arrivalTime) {
+      if (ride.arrivalTime <= effectiveStartTime) {
+        return res.status(400).json({
+          error:
+            "Existing arrivalTime is earlier than updated startTime. Send a later arrivalTime or null.",
+        })
+      }
+    }
+
+    if (updates.stops !== undefined) {
+      const stopsResult = parseStops(updates.stops)
+      if ("error" in stopsResult) {
+        return res.status(400).json({ error: stopsResult.error })
+      }
+      updateData.stops = stopsResult.stops
+    }
+
+    if (updates.amenities !== undefined) {
+      const amenitiesResult = parseAmenities(updates.amenities)
+      if ("error" in amenitiesResult) {
+        return res.status(400).json({ error: amenitiesResult.error })
+      }
+      updateData.amenities = amenitiesResult.amenities
+    }
+
+    if (updates.additionalNotes !== undefined) {
+      const additionalNotesResult = parseAdditionalNotes(updates.additionalNotes)
+      if ("error" in additionalNotesResult) {
+        return res.status(400).json({ error: additionalNotesResult.error })
+      }
+      updateData.additionalNotes = additionalNotesResult.additionalNotes
     }
 
     if (updates.seatsTotal != null) {
@@ -469,9 +698,7 @@ export async function updateRide(req: AuthRequest, res: Response) {
         toLng: updates.toLng ?? ride.toLng,
         seats: updates.seatsTotal ?? ride.seatsTotal,
         basePricePerSeat: updates.pricePerSeat,
-        departureTime: updates.startTime
-          ? new Date(updates.startTime)
-          : ride.startTime,
+        departureTime: effectiveStartTime,
       })
       updateData.pricePerSeat = pricing.pricePerSeat
     }
