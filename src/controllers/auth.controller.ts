@@ -17,6 +17,10 @@ interface OAuthBody {
   email: string
   name: string
   avatarUrl?: string
+  lat?: number | string
+  lng?: number | string
+  accuracyMeters?: number | string | null
+  recordedAt?: string
 }
 
 interface RegisterBody {
@@ -28,6 +32,10 @@ interface RegisterBody {
 interface LoginBody {
   email: string
   password: string
+  lat?: number | string
+  lng?: number | string
+  accuracyMeters?: number | string | null
+  recordedAt?: string
 }
 
 interface RefreshBody {
@@ -42,8 +50,98 @@ interface ResetPasswordBody {
 
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+class LocationValidationError extends Error {}
+
 function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex")
+}
+
+function parseNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function isValidLatitude(value: number) {
+  return Number.isFinite(value) && value >= -90 && value <= 90
+}
+
+function isValidLongitude(value: number) {
+  return Number.isFinite(value) && value >= -180 && value <= 180
+}
+
+async function upsertLocationIfProvided(
+  userId: string,
+  body: {
+    lat?: number | string
+    lng?: number | string
+    accuracyMeters?: number | string | null
+    recordedAt?: string
+  }
+) {
+  const hasLat = body.lat !== undefined && body.lat !== null
+  const hasLng = body.lng !== undefined && body.lng !== null
+  if (!hasLat && !hasLng) {
+    return
+  }
+  if (!hasLat || !hasLng) {
+    throw new LocationValidationError(
+      "Both lat and lng are required when sending location"
+    )
+  }
+
+  const lat = parseNumber(body.lat)
+  const lng = parseNumber(body.lng)
+  const accuracyMeters =
+    body.accuracyMeters === null
+      ? null
+      : parseNumber(body.accuracyMeters) ?? null
+
+  if (lat == null || lng == null) {
+    throw new LocationValidationError("lat and lng must be numbers")
+  }
+  if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
+    throw new LocationValidationError("lat/lng are out of range")
+  }
+  if (
+    accuracyMeters != null &&
+    (!Number.isFinite(accuracyMeters) || accuracyMeters < 0)
+  ) {
+    throw new LocationValidationError(
+      "accuracyMeters must be a non-negative number"
+    )
+  }
+
+  let recordedAt = new Date()
+  if (body.recordedAt) {
+    const parsedRecordedAt = new Date(body.recordedAt)
+    if (Number.isNaN(parsedRecordedAt.getTime())) {
+      throw new LocationValidationError("recordedAt must be a valid ISO date")
+    }
+    recordedAt = parsedRecordedAt
+  }
+
+  await prisma.userLocation.upsert({
+    where: { userId },
+    create: {
+      userId,
+      lat,
+      lng,
+      accuracyMeters,
+      recordedAt,
+    },
+    update: {
+      lat,
+      lng,
+      accuracyMeters,
+      recordedAt,
+    },
+  })
 }
 
 // Helper for issuing tokens + response shape
@@ -99,8 +197,6 @@ function generateEmailOtp() {
  */
 export async function oauthLogin(req: AuthRequest, res: Response) {
   try {
-    console.log(req.body)
-
     const { provider, providerUserId, email, name, avatarUrl } = (req.body ??
       {}) as Partial<OAuthBody>
 
@@ -149,9 +245,14 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       },
     })
 
+    await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<OAuthBody>)
+
     const response = await buildAuthResponse(user)
     return res.status(200).json(response)
   } catch (err) {
+    if (err instanceof LocationValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
     console.error("POST /auth/oauth error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
@@ -251,9 +352,14 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Invalid credentials" })
     }
 
+    await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<LoginBody>)
+
     const response = await buildAuthResponse(user)
     return res.status(200).json(response)
   } catch (err) {
+    if (err instanceof LocationValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
     console.error("POST /auth/login error", err)
     return res.status(500).json({ error: "Internal server error" })
   }

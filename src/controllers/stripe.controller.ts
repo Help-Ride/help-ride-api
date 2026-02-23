@@ -2,6 +2,7 @@ import type { Request, Response } from "express"
 import Stripe from "stripe"
 import prisma from "../lib/prisma.js"
 import type { AuthRequest } from "../middleware/auth.js"
+import { notifyNearbyDriversForRideRequest } from "../lib/nearbyDriverNotifications.js"
 import { dispatchRideRequest } from "../lib/realtime.js"
 import { getStripeWebhookSecret, stripe } from "../lib/stripe.js"
 
@@ -333,6 +334,39 @@ async function handleJitRideRequestIntentSucceeded({
     rideRequest: createdRequest,
     source: "created",
   })
+
+  try {
+    const nearbyNotification = await notifyNearbyDriversForRideRequest({
+      rideRequestId: createdRequest.id,
+      passengerId,
+      pickupCity: createdRequest.fromCity,
+      pickupLat: createdRequest.fromLat,
+      pickupLng: createdRequest.fromLng,
+      dropoffCity: createdRequest.toCity,
+    })
+    console.info(
+      "[webhooks][stripe] nearby driver notification completed",
+      JSON.stringify({
+        eventId,
+        paymentIntentId: intent.id,
+        rideRequestId: createdRequest.id,
+        matchedDrivers: nearbyNotification.matchedDrivers,
+        notifiedDrivers: nearbyNotification.notifiedDrivers,
+        radiusKm: nearbyNotification.radiusKm,
+        maxLocationAgeMinutes: nearbyNotification.locationMaxAgeMinutes,
+      })
+    )
+  } catch (notifyErr) {
+    console.error(
+      "[webhooks][stripe] nearby driver notification failed",
+      JSON.stringify({
+        eventId,
+        paymentIntentId: intent.id,
+        rideRequestId: createdRequest.id,
+      }),
+      notifyErr
+    )
+  }
 }
 
 type PaymentStatusUpdate = "succeeded" | "failed" | "refunded"

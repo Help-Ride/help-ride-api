@@ -4,6 +4,7 @@ import { authGuard } from "../middleware/auth.js"
 import {
   changeUserPassword,
   getUserById,
+  updateMyLocation,
   updateUserProfile,
 } from "../controllers/user.controller.js"
 
@@ -17,5 +18,6 @@ router.put("/:id", authGuard, updateUserProfile)
 
 // Change own password
 router.put("/me/password", authGuard, changeUserPassword)
+router.put("/me/location", authGuard, updateMyLocation)
 
 export default router

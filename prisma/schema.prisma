@@ -131,6 +131,7 @@ model User {
   messages               Message[]
   deviceTokens           DeviceToken[]
   supportTickets         SupportTicket[]
+  userLocation           UserLocation?
 }
 
 model OAuthAccount {
@@ -276,6 +277,21 @@ model DeviceToken {
   updatedAt DateTime        @updatedAt
 
   @@index([userId])
+}
+
+model UserLocation {
+  id             String   @id @default(uuid())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String   @unique
+  lat            Float
+  lng            Float
+  accuracyMeters Float?
+  recordedAt     DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([lat, lng])
+  @@index([updatedAt])
 }
 
 model SosEvent {

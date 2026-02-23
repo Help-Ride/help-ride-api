@@ -15,6 +15,32 @@ interface ChangePasswordBody {
   newPassword?: string
 }
 
+interface UpdateMyLocationBody {
+  lat?: number | string
+  lng?: number | string
+  accuracyMeters?: number | string | null
+  recordedAt?: string
+}
+
+function parseNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function isValidLatitude(value: number) {
+  return Number.isFinite(value) && value >= -90 && value <= 90
+}
+
+function isValidLongitude(value: number) {
+  return Number.isFinite(value) && value >= -180 && value <= 180
+}
+
 /**
  * GET /api/users/:id
  * Public user profile (safe fields only).
@@ -155,6 +181,86 @@ export async function changeUserPassword(req: AuthRequest, res: Response) {
     return res.status(200).json({ message: "Password updated successfully." })
   } catch (err) {
     console.error("PUT /users/:id/password error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * PUT /api/users/me/location
+ * Save latest user location (call on app open/login).
+ */
+export async function updateMyLocation(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const body = (req.body ?? {}) as UpdateMyLocationBody
+    const lat = parseNumber(body.lat)
+    const lng = parseNumber(body.lng)
+    const accuracyMeters =
+      body.accuracyMeters === null
+        ? null
+        : parseNumber(body.accuracyMeters) ?? null
+
+    if (lat == null || lng == null) {
+      return res.status(400).json({ error: "lat and lng are required" })
+    }
+
+    if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
+      return res.status(400).json({
+        error: "lat must be between -90 and 90, lng between -180 and 180",
+      })
+    }
+
+    if (
+      accuracyMeters != null &&
+      (!Number.isFinite(accuracyMeters) || accuracyMeters < 0)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "accuracyMeters must be a non-negative number" })
+    }
+
+    let recordedAt = new Date()
+    if (body.recordedAt) {
+      const parsed = new Date(body.recordedAt)
+      if (Number.isNaN(parsed.getTime())) {
+        return res
+          .status(400)
+          .json({ error: "recordedAt must be a valid ISO date" })
+      }
+      recordedAt = parsed
+    }
+
+    const saved = await prisma.userLocation.upsert({
+      where: { userId: req.userId },
+      create: {
+        userId: req.userId,
+        lat,
+        lng,
+        accuracyMeters,
+        recordedAt,
+      },
+      update: {
+        lat,
+        lng,
+        accuracyMeters,
+        recordedAt,
+      },
+      select: {
+        userId: true,
+        lat: true,
+        lng: true,
+        accuracyMeters: true,
+        recordedAt: true,
+        updatedAt: true,
+      },
+    })
+
+    return res.status(200).json(saved)
+  } catch (err) {
+    console.error("PUT /users/me/location error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

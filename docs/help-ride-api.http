@@ -57,6 +57,20 @@ Content-Type: application/json
 
 ###
 
+### LOGIN WITH LOCATION SNAPSHOT (OPTIONAL)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "StrongPass123!",
+  "lat": 43.4643,
+  "lng": -80.5204,
+  "accuracyMeters": 15
+}
+
+###
+
 # Set from login/register/oauth response
 @refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2OTQxMDI0MCwiZXhwIjoxNzcwMDE1MDQwLCJqdGkiOiI5MjMxNTgzMi04ZTRjLTRkNDYtOGU1Ni0xMjk2YTFmYjAyZDEifQ.5S-Vr3yo6D2X5p8kirJAo_1Mk2187vk95eQLQdV9jT4
 
@@ -139,7 +153,9 @@ Content-Type: application/json
   "providerUserId": "google-1234567890",
   "email": "testuser@example.com",
   "name": "Test User",
-  "avatarUrl": "https://example.com/avatar.png"
+  "avatarUrl": "https://example.com/avatar.png",
+  "lat": 43.4643,
+  "lng": -80.5204
 }
 
 ###
@@ -179,6 +195,20 @@ Content-Type: application/json
 
 {
   "name": "Updated Name"
+}
+
+###
+
+### UPDATE MY LIVE LOCATION (CALL ON LOGIN / APP OPEN)
+PUT {{baseUrl}}/users/me/location
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "lat": 43.4643,
+  "lng": -80.5204,
+  "accuracyMeters": 12,
+  "recordedAt": "2026-02-11T10:20:00.000Z"
 }
 
 ###
@@ -599,6 +629,7 @@ Authorization: Bearer {{accessToken}}
 ################################################
 
 ### CREATE JIT PAYMENT INTENT (PASSENGER, <= 2 HOURS TO DEPARTURE)
+# On successful payment webhook, ride request is created and nearby drivers are notified.
 POST {{baseUrl}}/ride-requests/jit/intent
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -621,6 +652,7 @@ Content-Type: application/json
 
 ### CREATE RIDE REQUEST (PASSENGER, VERIFIED)
 # NOTE: For departures within 2 hours, call /ride-requests/jit/intent first.
+# Nearby drivers (with recent location updates) are notified automatically.
 POST {{baseUrl}}/ride-requests
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

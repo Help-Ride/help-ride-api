@@ -3,10 +3,10 @@ import { createHash } from "node:crypto"
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { notifyUsersByRole } from "../lib/notifications.js"
 import { resolveSeatPrice } from "../lib/pricing.js"
 import { initiateRideRequestRefund } from "../lib/refunds.js"
 import { getPlatformFeePct, stripe } from "../lib/stripe.js"
+import { notifyNearbyDriversForRideRequest } from "../lib/nearbyDriverNotifications.js"
 import {
   dispatchRideRequest,
   dispatchRideRequestCancel,
@@ -305,17 +305,25 @@ export async function createRide(req: AuthRequest, res: Response) {
       )
     }
 
-    await notifyUsersByRole({
-      role: "driver",
-      excludeUserId: req.userId,
-      title: "New ride request",
-      body: `${request.fromCity} → ${request.toCity} request posted`,
-      type: "ride_update",
-      data: {
-        rideRequestId: request.id,
-        kind: "ride_request_created",
-      },
+    const nearbyNotification = await notifyNearbyDriversForRideRequest({
+      rideRequestId: request.id,
+      passengerId: req.userId,
+      pickupCity: request.fromCity,
+      pickupLat: request.fromLat,
+      pickupLng: request.fromLng,
+      dropoffCity: request.toCity,
     })
+
+    console.info(
+      "[dispatch] nearby driver notification completed",
+      JSON.stringify({
+        rideRequestId: request.id,
+        matchedDrivers: nearbyNotification.matchedDrivers,
+        notifiedDrivers: nearbyNotification.notifiedDrivers,
+        radiusKm: nearbyNotification.radiusKm,
+        maxLocationAgeMinutes: nearbyNotification.locationMaxAgeMinutes,
+      })
+    )
 
     return res.status(201).json(offeringRequest)
   } catch (err) {

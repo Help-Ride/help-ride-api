@@ -18,6 +18,14 @@ type BroadcastPayload = {
   excludeUserId?: string
 }
 
+type MultiUserPayload = {
+  userIds: string[]
+  title: string
+  body: string
+  type?: "ride_update" | "payment" | "system"
+  data?: Record<string, string | number | boolean>
+}
+
 const INVALID_TOKEN_ERRORS = new Set([
   "messaging/invalid-registration-token",
   "messaging/registration-token-not-registered",
@@ -121,6 +129,46 @@ async function sendPushToTokens(
     await prisma.deviceToken.deleteMany({
       where: { token: { in: invalidTokens } },
     })
+  }
+}
+
+export async function notifyUsersByIds(payload: MultiUserPayload) {
+  try {
+    const userIds = Array.from(
+      new Set(payload.userIds.filter((userId) => userId.trim().length > 0))
+    )
+
+    if (userIds.length === 0) {
+      return { notified: 0 }
+    }
+
+    await prisma.notification.createMany({
+      data: userIds.map((userId) => ({
+        userId,
+        title: payload.title,
+        body: payload.body,
+        type: payload.type ?? "system",
+      })),
+    })
+
+    const tokens = await prisma.deviceToken.findMany({
+      where: { userId: { in: userIds } },
+      select: { token: true },
+    })
+
+    await sendPushToTokens(
+      tokens.map((tokenRecord) => tokenRecord.token),
+      {
+        title: payload.title,
+        body: payload.body,
+        data: payload.data,
+      }
+    )
+
+    return { notified: userIds.length }
+  } catch (err) {
+    console.error("multi-user notification broadcast error", err)
+    return { notified: 0 }
   }
 }
 
