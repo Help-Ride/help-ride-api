@@ -25,9 +25,10 @@ export async function createDriverProfile(req: AuthRequest, res: Response) {
     if (!req.userId) {
       return res.status(401).json({ error: "Unauthorized" })
     }
+    const userId = req.userId
 
     const existing = await prisma.driverProfile.findUnique({
-      where: { userId: req.userId },
+      where: { userId },
     })
 
     if (existing) {
@@ -38,27 +39,36 @@ export async function createDriverProfile(req: AuthRequest, res: Response) {
 
     const body = (req.body ?? {}) as DriverProfileBody
 
-    const profile = await prisma.driverProfile.create({
-      data: {
-        userId: req.userId,
-        carMake: body.carMake ?? null,
-        carModel: body.carModel ?? null,
-        carYear: body.carYear ?? null,
-        carColor: body.carColor ?? null,
-        plateNumber: body.plateNumber ?? null,
-        licenseNumber: body.licenseNumber ?? null,
-        insuranceInfo: body.insuranceInfo ?? null,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            providerAvatarUrl: true,
+    const profile = await prisma.$transaction(async (tx) => {
+      const created = await tx.driverProfile.create({
+        data: {
+          userId,
+          carMake: body.carMake ?? null,
+          carModel: body.carModel ?? null,
+          carYear: body.carYear ?? null,
+          carColor: body.carColor ?? null,
+          plateNumber: body.plateNumber ?? null,
+          licenseNumber: body.licenseNumber ?? null,
+          insuranceInfo: body.insuranceInfo ?? null,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              providerAvatarUrl: true,
+            },
           },
         },
-      },
+      })
+
+      await tx.user.update({
+        where: { id: userId },
+        data: { roleDefault: "driver" },
+      })
+
+      return created
     })
 
     return res.status(201).json(profile)
@@ -271,7 +281,13 @@ export async function deleteDriverVehicle(req: AuthRequest, res: Response) {
       })
     }
 
-    await prisma.driverProfile.delete({ where: { userId: id } })
+    await prisma.$transaction(async (tx) => {
+      await tx.driverProfile.delete({ where: { userId: id } })
+      await tx.user.update({
+        where: { id },
+        data: { roleDefault: "passenger" },
+      })
+    })
     return res.status(204).send()
   } catch (err) {
     console.error("DELETE /api/drivers/:id/vehicles/:vehicleId error", err)

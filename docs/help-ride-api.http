@@ -596,6 +596,14 @@ Content-Type: application/json
 
 ###
 
+### CHECK CURRENT USER ROLE AFTER DRIVER PROFILE CREATE
+# Expect: roleDefault = "driver"
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### DRIVER SUMMARY (RIDES + EARNINGS)
 GET {{baseUrl}}/drivers/me/summary
 Authorization: Bearer {{driverAccessToken}}
@@ -645,6 +653,14 @@ Content-Type: application/json
 ### DELETE VEHICLE (ALIAS, SINGLE VEHICLE)
 DELETE {{baseUrl}}/drivers/{{userId}}/vehicles/{{vehicleId}}
 Authorization: Bearer {{accessToken}}
+
+###
+
+### CHECK CURRENT USER ROLE AFTER DRIVER PROFILE DELETE
+# Expect: roleDefault = "passenger"
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
 
 ###
 

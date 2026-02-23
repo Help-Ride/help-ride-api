@@ -145,6 +145,31 @@ async function upsertLocationIfProvided(
 }
 
 // Helper for issuing tokens + response shape
+async function resolveRoleDefaultForAuth(user: {
+  id: string
+  roleDefault: "passenger" | "driver"
+}) {
+  if (user.roleDefault === "driver") {
+    return "driver" as const
+  }
+
+  const driverProfile = await prisma.driverProfile.findUnique({
+    where: { userId: user.id },
+    select: { id: true },
+  })
+
+  if (!driverProfile) {
+    return user.roleDefault
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { roleDefault: "driver" },
+  })
+
+  return "driver" as const
+}
+
 async function buildAuthResponse(user: {
   id: string
   name: string
@@ -152,9 +177,11 @@ async function buildAuthResponse(user: {
   roleDefault: "passenger" | "driver"
   providerAvatarUrl: string | null
 }) {
+  const resolvedRoleDefault = await resolveRoleDefaultForAuth(user)
+
   const payload = {
     sub: user.id,
-    roleDefault: user.roleDefault,
+    roleDefault: resolvedRoleDefault,
   }
 
   const accessToken = signAccessToken(payload)
@@ -175,7 +202,7 @@ async function buildAuthResponse(user: {
       id: user.id,
       name: user.name,
       email: user.email,
-      roleDefault: user.roleDefault,
+      roleDefault: resolvedRoleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
     },
     tokens: {
