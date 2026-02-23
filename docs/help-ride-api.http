@@ -14,10 +14,15 @@
 @deviceToken =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @driverId = 3a81a31f-9d7d-48ed-b512-b16a7b663025
+@driverDocumentId =
+@rideRequestId =
+@paymentId =
+@supportTicketId =
 @email = patel.rishi3001@gmail.com
 @otp = 332576
 @resetOtp = 112233
 @realtimeSecret = replace-with-REALTIME_TO_API_SECRET
+@adminApiKey = replace-with-ADMIN_API_KEY
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -993,3 +998,266 @@ Accept: application/json
 # Expiry: Any future date (e.g. 12/34)
 # CVC: Any 3 digits (e.g. 123)
 # ZIP / Postal: Any (e.g. A1A1A1 or 12345)
+
+################################################
+### 🛠️ ADMIN API (x-admin-api-key)
+################################################
+
+### LIST DRIVERS
+GET {{baseUrl}}/admin/drivers?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### GET DRIVER DETAILS
+GET {{baseUrl}}/admin/drivers/{{driverId}}
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### VERIFY DRIVER (approve|reject)
+POST {{baseUrl}}/admin/drivers/{{driverId}}/verify
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "action": "approve",
+  "reason": "All checks passed",
+  "sendNotification": true
+}
+
+###
+
+### REVIEW DRIVER DOCUMENT
+PATCH {{baseUrl}}/admin/drivers/{{driverId}}/documents/{{driverDocumentId}}
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "status": "approved",
+  "reviewNotes": "Looks valid"
+}
+
+###
+
+### GET DRIVER DOCUMENT URL
+GET {{baseUrl}}/admin/drivers/{{driverId}}/documents/{{driverDocumentId}}/url?expiresIn=3600
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### REQUEST ADDITIONAL DRIVER DOCS
+POST {{baseUrl}}/admin/drivers/{{driverId}}/documents/request
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "documentType": "insurance",
+  "reason": "Current policy is expired"
+}
+
+###
+
+### LIST RIDES
+GET {{baseUrl}}/admin/rides?status=open&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CREATE RIDE (ADMIN)
+POST {{baseUrl}}/admin/rides
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "driverId": "{{driverId}}",
+  "fromCity": "Toronto",
+  "fromLat": 43.6532,
+  "fromLng": -79.3832,
+  "toCity": "Waterloo",
+  "toLat": 43.4643,
+  "toLng": -80.5204,
+  "startTime": "2026-03-10T15:00:00.000Z",
+  "pricePerSeat": 32.5,
+  "seatsTotal": 3
+}
+
+###
+
+### BULK CREATE RIDES
+POST {{baseUrl}}/admin/rides/bulk
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "driverId": "{{driverId}}",
+  "rides": [
+    {
+      "clientRowId": "r-1",
+      "fromCity": "Toronto",
+      "fromLat": 43.6532,
+      "fromLng": -79.3832,
+      "toCity": "Kitchener",
+      "toLat": 43.4516,
+      "toLng": -80.4925,
+      "startTime": "2026-03-11T14:00:00.000Z",
+      "pricePerSeat": 30,
+      "seatsTotal": 3
+    }
+  ]
+}
+
+###
+
+### UPDATE RIDE STATUS
+PUT {{baseUrl}}/admin/rides/{{rideId}}/status
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "status": "in_progress",
+  "sendNotification": true
+}
+
+###
+
+### LIST ELIGIBLE DRIVERS FOR RIDE
+GET {{baseUrl}}/admin/rides/{{rideId}}/eligible-drivers?limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### LIST RIDE REQUESTS
+GET {{baseUrl}}/admin/ride-requests?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CREATE OFFER FOR REQUEST
+POST {{baseUrl}}/admin/ride-requests/{{rideRequestId}}/offers
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}",
+  "seatsOffered": 1
+}
+
+###
+
+### LIST BOOKINGS
+GET {{baseUrl}}/admin/bookings?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CONFIRM BOOKING (ADMIN)
+PUT {{baseUrl}}/admin/bookings/{{bookingId}}/confirm
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "reason": "Manual approval"
+}
+
+###
+
+### CANCEL BOOKING (ADMIN)
+PUT {{baseUrl}}/admin/bookings/{{bookingId}}/cancel
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "reason": "Admin override",
+  "refundRequired": true
+}
+
+###
+
+### LIST PAYMENTS
+GET {{baseUrl}}/admin/payments?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### MARK PAYMENT AS PAID (ADMIN OVERRIDE)
+PUT {{baseUrl}}/admin/payments/{{paymentId}}/mark-paid
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "notes": "Confirmed via offline transfer"
+}
+
+###
+
+### REFUND PAYMENT (ADMIN)
+POST {{baseUrl}}/admin/payments/{{paymentId}}/refund
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+Idempotency-Key: refund-{{$timestamp}}
+
+{
+  "reason": "Service disruption",
+  "amount": 10
+}
+
+###
+
+### DASHBOARD STATS
+GET {{baseUrl}}/admin/dashboard/stats?dateFrom=2026-01-01&dateTo=2026-02-01
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### GLOBAL SEARCH
+GET {{baseUrl}}/admin/search?q=toronto&types=rides,drivers,bookings,users&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### SUPPORT TICKETS (ADMIN)
+GET {{baseUrl}}/admin/support-tickets?status=open&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CREATE SUPPORT TICKET (ADMIN)
+POST {{baseUrl}}/admin/support-tickets
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "subject": "Manual incident follow-up",
+  "description": "Driver and passenger reported a route issue."
+}
+
+###
+
+### RESOLVE SUPPORT TICKET (ADMIN)
+POST {{baseUrl}}/admin/support-tickets/{{supportTicketId}}/resolve
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "resolution": "Issue resolved and user informed."
+}
+
+###
+
+### PLATFORM SETTINGS (ALIAS OF APP CONFIG)
+GET {{baseUrl}}/admin/settings
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json

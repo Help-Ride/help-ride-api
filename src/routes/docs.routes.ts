@@ -1,6 +1,8 @@
 import { Router } from "express"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { API_ROUTE_MOUNTS } from "./index.js"
+import webhookRoutes from "./webhook.routes.js"
 
 type PostmanCollection = {
   info?: {
@@ -52,6 +54,11 @@ type OpenApiOperation = {
   requestBody?: Record<string, unknown>
   security?: Array<Record<string, string[]>>
   responses: Record<string, unknown>
+}
+
+type DiscoveredRoute = {
+  path: string
+  method: string
 }
 
 const COLLECTION_PATH = path.join(process.cwd(), "docs", "HelpRide-API.postman_collection.json")
@@ -192,7 +199,7 @@ function buildOpenApi(collection: PostmanCollection) {
     paths[operationPath][method] = operation
   })
 
-  return {
+  const spec = {
     openapi: "3.0.3",
     info: {
       title: collection.info?.name || "HelpRide API",
@@ -221,6 +228,9 @@ function buildOpenApi(collection: PostmanCollection) {
     },
     paths,
   }
+
+  mergeDiscoveredExpressRoutes(spec)
+  return spec
 }
 
 function walkCollection(items: PostmanItem[], chain: string[], onRequest: (item: PostmanItem, chain: string[]) => void) {
@@ -326,7 +336,9 @@ function parseRequestUrl(url?: string | PostmanUrl) {
 }
 
 function normalizePathTemplate(inputPath: string) {
-  const withParams = inputPath.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, "{$1}")
+  const withParams = inputPath
+    .replace(/\{\{\s*([\w.-]+)\s*\}\}/g, "{$1}")
+    .replace(/:([\w.-]+)/g, "{$1}")
   if (!withParams.startsWith("/")) {
     return `/${withParams}`
   }
@@ -443,6 +455,179 @@ function pickDescription(description: unknown) {
     return content || undefined
   }
   return undefined
+}
+
+function mergeDiscoveredExpressRoutes(spec: {
+  paths: Record<string, Record<string, OpenApiOperation>>
+  tags?: Array<{ name: string }>
+}) {
+  const discoveredRoutes = discoverExpressRoutes()
+
+  const tags = spec.tags ?? []
+  const tagNamesByKey = new Map<string, string>()
+  for (const tag of tags) {
+    if (!tag?.name) continue
+    tagNamesByKey.set(tag.name.toLowerCase(), tag.name)
+  }
+
+  for (const route of discoveredRoutes) {
+    const operationPath = normalizePathTemplate(route.path)
+    const method = route.method.toLowerCase()
+
+    spec.paths[operationPath] ??= {}
+    if (spec.paths[operationPath][method]) {
+      continue
+    }
+
+    const inferredTag = inferTagFromPath(operationPath)
+    const tagKey = inferredTag.toLowerCase()
+    const tagName = tagNamesByKey.get(tagKey) ?? inferredTag
+    if (!tagNamesByKey.has(tagKey)) {
+      tagNamesByKey.set(tagKey, tagName)
+      tags.push({ name: tagName })
+    }
+
+    const operation: OpenApiOperation = {
+      summary: `Auto-discovered ${method.toUpperCase()} ${operationPath}`,
+      description: "Generated from the Express router so docs stay in sync with code.",
+      tags: [tagName],
+      responses: {
+        "200": {
+          description: "Successful response",
+        },
+      },
+    }
+
+    const parameters: Array<Record<string, unknown>> = []
+    for (const pathParam of getPathParams(operationPath)) {
+      parameters.push({
+        name: pathParam,
+        in: "path",
+        required: true,
+        schema: { type: "string" },
+      })
+    }
+
+    if (operationPath.startsWith("/admin")) {
+      parameters.push({
+        name: "x-admin-api-key",
+        in: "header",
+        required: true,
+        schema: { type: "string" },
+        example: "replace-with-ADMIN_API_KEY",
+      })
+    }
+
+    if (parameters.length > 0) {
+      operation.parameters = dedupeParameters(parameters)
+    }
+
+    if (method === "post" || method === "put" || method === "patch") {
+      operation.requestBody = {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: true,
+            },
+            example: {},
+          },
+        },
+      }
+    }
+
+    spec.paths[operationPath][method] = operation
+  }
+
+  spec.tags = tags.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function discoverExpressRoutes() {
+  const discovered: DiscoveredRoute[] = []
+
+  for (const mount of API_ROUTE_MOUNTS) {
+    collectRouterRoutes(mount.router, mount.path, discovered)
+  }
+
+  collectRouterRoutes(webhookRoutes, "/webhooks", discovered)
+
+  discovered.push(
+    { path: "/health", method: "get" },
+    { path: "/db-check", method: "get" },
+    { path: "/docs", method: "get" },
+    { path: "/docs/openapi.json", method: "get" }
+  )
+
+  const deduped: DiscoveredRoute[] = []
+  const seen = new Set<string>()
+  for (const route of discovered) {
+    const key = `${route.method.toLowerCase()} ${normalizePathTemplate(route.path)}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    deduped.push(route)
+  }
+
+  return deduped
+}
+
+function collectRouterRoutes(
+  router: { stack?: any[] },
+  mountPath: string,
+  into: DiscoveredRoute[]
+) {
+  const stack = router.stack
+  if (!Array.isArray(stack)) {
+    return
+  }
+
+  for (const layer of stack) {
+    if (!layer?.route) {
+      continue
+    }
+
+    const routePaths = Array.isArray(layer.route.path)
+      ? layer.route.path
+      : [layer.route.path]
+    const methods = Object.entries(layer.route.methods ?? {})
+      .filter(([, enabled]) => Boolean(enabled))
+      .map(([method]) => method.toLowerCase())
+
+    for (const routePath of routePaths) {
+      if (typeof routePath !== "string") {
+        continue
+      }
+      const fullPath = joinRoutePath(mountPath, routePath)
+      for (const method of methods) {
+        into.push({
+          path: fullPath,
+          method,
+        })
+      }
+    }
+  }
+}
+
+function joinRoutePath(mountPath: string, routePath: string) {
+  const normalizedMount = mountPath.startsWith("/") ? mountPath : `/${mountPath}`
+  const normalizedRoute =
+    routePath === "/"
+      ? ""
+      : routePath.startsWith("/")
+        ? routePath
+        : `/${routePath}`
+  const merged = `${normalizedMount}${normalizedRoute}`.replace(/\/{2,}/g, "/")
+  return merged || "/"
+}
+
+function inferTagFromPath(pathname: string) {
+  const firstSegment = pathname.split("/").filter(Boolean)[0] ?? "General"
+  return firstSegment
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ")
 }
 
 function renderDocsHtml() {
