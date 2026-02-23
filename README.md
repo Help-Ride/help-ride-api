@@ -87,6 +87,8 @@ AWS_S3_BUCKET="your-bucket-name"
 AWS_REGION="us-east-1"
 AWS_ACCESS_KEY_ID="AKIA..."
 AWS_SECRET_ACCESS_KEY="..."
+# Optional: public base URL for user avatar files (e.g. CloudFront)
+AWS_S3_PUBLIC_BASE_URL="https://cdn.example.com"
 
 # Pusher (Chat)
 PUSHER_APP_ID="your-app-id"
@@ -471,6 +473,20 @@ Used on routes like `/rides`, `/bookings`, `/ride-requests`, `/drivers` (POST).
 ```
 
 - Partial update of the current user's profile.
+
+### Upload Profile Photo (Presign)
+
+`POST /api/users/:id/avatar/presign` (JWT – must match current user)
+
+```json
+{
+  "fileName": "avatar.png",
+  "mimeType": "image/png"
+}
+```
+
+- Returns a presigned S3 upload URL.
+- Updates `providerAvatarUrl` to the uploaded file URL.
 
 ---
 

@@ -2060,6 +2060,33 @@ Response:
 
 ---
 
+### Upload Profile Photo (Presign)
+
+`POST /users/{userId}/avatar/presign`
+
+```json
+{
+  "fileName": "avatar.png",
+  "mimeType": "image/png"
+}
+```
+
+Response:
+
+```json
+{
+  "uploadUrl": "https://s3.example.com/presigned-url",
+  "avatar": {
+    "fileName": "avatar.png",
+    "mimeType": "image/png",
+    "s3Key": "users/user-uuid/avatar/avatar-uuid-avatar.png",
+    "url": "https://bucket.s3.amazonaws.com/users/user-uuid/avatar/avatar-uuid-avatar.png"
+  }
+}
+```
+
+---
+
 ## 📄 Driver Documents
 
 ### Get Upload URL
@@ -2073,6 +2100,9 @@ Response:
   "mimeType": "image/jpeg"
 }
 ```
+
+Allowed `type` values: `license`, `insurance`, `ownership`, `other`.
+`registration` is also accepted and normalized to `ownership`.
 
 Response:
 

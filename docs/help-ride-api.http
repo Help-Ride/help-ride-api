@@ -865,13 +865,25 @@ Content-Type: application/json
 
 ###
 
-### 🔐 Get upload URL for driver document (license)
+### UPLOAD MY PROFILE PHOTO (PRESIGN + SAVE URL)
+POST {{baseUrl}}/users/{{userId}}/avatar/presign
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fileName": "my-profile-photo.png",
+  "mimeType": "image/png"
+}
+
+###
+
+### 🔐 Get upload URL for driver document (registration alias -> ownership)
 POST {{baseUrl}}/drivers/{{userId}}/documents/presign
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "type": "license",
+  "type": "registration",
   "fileName": "Rishi_logo.png",
   "mimeType": "image/jpeg"
 }

@@ -1,8 +1,10 @@
 // src/controllers/user.controller.ts
 import type { Response } from "express"
 import bcrypt from "bcryptjs"
+import { randomUUID } from "crypto"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { getPublicFileUrl, getUploadUrl } from "../lib/s3.js"
 
 interface UpdateUserBody {
   name?: string
@@ -22,6 +24,11 @@ interface UpdateMyLocationBody {
   recordedAt?: string
 }
 
+interface PresignUserAvatarBody {
+  fileName?: string
+  mimeType?: string
+}
+
 function parseNumber(value: unknown) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null
@@ -39,6 +46,73 @@ function isValidLatitude(value: number) {
 
 function isValidLongitude(value: number) {
   return Number.isFinite(value) && value >= -180 && value <= 180
+}
+
+/**
+ * POST /api/users/:id/avatar/presign
+ * Returns a presigned upload URL and updates providerAvatarUrl.
+ */
+export async function createUserAvatarPresign(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: "id is required" })
+    }
+
+    if (id !== req.userId) {
+      return res.status(403).json({
+        error: "You can only upload a photo for your own profile",
+      })
+    }
+
+    const { fileName, mimeType } = (req.body ?? {}) as PresignUserAvatarBody
+
+    if (!fileName || !mimeType) {
+      return res
+        .status(400)
+        .json({ error: "fileName and mimeType are required" })
+    }
+
+    if (!mimeType.toLowerCase().startsWith("image/")) {
+      return res.status(400).json({
+        error: "mimeType must be an image/* type",
+      })
+    }
+
+    const safeFileName = fileName.replace(/[^\w.\-]/g, "_")
+    const s3Key = `users/${req.userId}/avatar/${randomUUID()}-${safeFileName}`
+    const uploadUrl = await getUploadUrl({
+      key: s3Key,
+      contentType: mimeType,
+    })
+    const avatarUrl = getPublicFileUrl(s3Key)
+
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { providerAvatarUrl: avatarUrl },
+      select: {
+        id: true,
+        providerAvatarUrl: true,
+      },
+    })
+
+    return res.status(201).json({
+      uploadUrl,
+      avatar: {
+        fileName: safeFileName,
+        mimeType,
+        s3Key,
+        url: user.providerAvatarUrl,
+      },
+    })
+  } catch (err) {
+    console.error("POST /users/:id/avatar/presign error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
 }
 
 /**

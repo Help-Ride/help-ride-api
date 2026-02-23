@@ -3,6 +3,7 @@ import { Router } from "express"
 import { authGuard } from "../middleware/auth.js"
 import {
   changeUserPassword,
+  createUserAvatarPresign,
   getUserById,
   updateMyLocation,
   updateUserProfile,
@@ -15,6 +16,7 @@ router.get("/:id", getUserById)
 
 // Update own profile
 router.put("/:id", authGuard, updateUserProfile)
+router.post("/:id/avatar/presign", authGuard, createUserAvatarPresign)
 
 // Change own password
 router.put("/me/password", authGuard, changeUserPassword)

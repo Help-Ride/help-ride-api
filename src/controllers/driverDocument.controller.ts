@@ -6,9 +6,27 @@ import { AuthRequest } from "../middleware/auth.js"
 import { getUploadUrl, getDownloadUrl } from "../lib/s3.js"
 
 interface PresignBody {
-  type?: "license" | "insurance" | "ownership" | "other"
+  type?: string
   fileName?: string
   mimeType?: string
+}
+
+const DRIVER_DOCUMENT_TYPES = ["license", "insurance", "ownership", "other"] as const
+type DriverDocumentType = (typeof DRIVER_DOCUMENT_TYPES)[number]
+
+const DRIVER_DOCUMENT_TYPE_ALIASES: Record<string, DriverDocumentType> = {
+  registration: "ownership",
+}
+
+function normalizeDriverDocumentType(input?: string): DriverDocumentType | null {
+  if (!input) return null
+
+  const type = input.trim().toLowerCase()
+  if (DRIVER_DOCUMENT_TYPES.includes(type as DriverDocumentType)) {
+    return type as DriverDocumentType
+  }
+
+  return DRIVER_DOCUMENT_TYPE_ALIASES[type] ?? null
 }
 
 /**
@@ -36,11 +54,18 @@ export async function createDriverDocumentPresign(
       })
     }
 
-    const { type, fileName, mimeType } = (req.body ?? {}) as PresignBody
+    const { type: rawType, fileName, mimeType } = (req.body ?? {}) as PresignBody
+    const type = normalizeDriverDocumentType(rawType)
 
-    if (!type || !fileName || !mimeType) {
+    if (!rawType || !fileName || !mimeType) {
       return res.status(400).json({
         error: "type, fileName, and mimeType are required",
+      })
+    }
+    if (!type) {
+      return res.status(400).json({
+        error:
+          "Invalid type. Allowed: license, insurance, ownership, other (registration is accepted as ownership).",
       })
     }
 
