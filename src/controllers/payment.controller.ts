@@ -4,6 +4,7 @@ import prisma from "../lib/prisma.js"
 import type { AuthRequest } from "../middleware/auth.js"
 import { calculateBookingFareCents } from "../lib/payments.js"
 import { getPlatformFeePct, stripe } from "../lib/stripe.js"
+import { notifyUser } from "../lib/notifications.js"
 
 interface CreatePaymentIntentBody {
   bookingId?: string
@@ -69,6 +70,26 @@ function canAccessBookingPayment(
   return booking.passengerId === userId || booking.ride.driverId === userId
 }
 
+async function notifyDriverPaymentPending(payload: {
+  driverId: string
+  bookingId: string
+  rideId: string
+  fromCity: string
+  toCity: string
+}) {
+  await notifyUser({
+    userId: payload.driverId,
+    title: "Payment pending",
+    body: `${payload.fromCity} → ${payload.toCity} payment is pending`,
+    type: "payment",
+    data: {
+      bookingId: payload.bookingId,
+      rideId: payload.rideId,
+      kind: "booking_payment_pending",
+    },
+  })
+}
+
 /**
  * POST /api/payments/intent
  * Passenger creates a PaymentIntent for an accepted booking
@@ -97,8 +118,10 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
         ride: {
           select: {
             id: true,
+            fromCity: true,
             fromLat: true,
             fromLng: true,
+            toCity: true,
             toLat: true,
             toLng: true,
             pricePerSeat: true,
@@ -194,6 +217,19 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
                 ]),
           ])
 
+          const shouldNotifyPending =
+            existingIntent.status !== "succeeded" &&
+            (booking.status !== "PAYMENT_PENDING" || booking.paymentStatus !== "pending")
+          if (shouldNotifyPending) {
+            await notifyDriverPaymentPending({
+              driverId: booking.ride.driver.id,
+              bookingId: booking.id,
+              rideId: booking.ride.id,
+              fromCity: booking.ride.fromCity,
+              toCity: booking.ride.toCity,
+            })
+          }
+
           console.info(
             "[payments] Reusing existing payment intent",
             JSON.stringify({
@@ -265,6 +301,16 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
         },
       }),
     ])
+
+    if (booking.status !== "PAYMENT_PENDING" || booking.paymentStatus !== "pending") {
+      await notifyDriverPaymentPending({
+        driverId: booking.ride.driver.id,
+        bookingId: booking.id,
+        rideId: booking.ride.id,
+        fromCity: booking.ride.fromCity,
+        toCity: booking.ride.toCity,
+      })
+    }
 
     console.info(
       "[payments] Created payment intent",

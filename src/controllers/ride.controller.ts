@@ -3,7 +3,7 @@ import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { classifyRideTimingByDeparture, resolveSeatPrice } from "../lib/pricing.js"
-import { notifyUser, notifyUsersByRole } from "../lib/notifications.js"
+import { notifyUser, notifyUsersByIds, notifyUsersByRole } from "../lib/notifications.js"
 import { initiateBookingRefundIfPaid } from "../lib/refunds.js"
 
 interface CreateRideBody {
@@ -29,6 +29,13 @@ const RIDE_AMENITIES = [
   "pet_friendly",
   "luggage_space",
   "child_seat",
+] as const
+const ACTIVE_BOOKING_NOTIFICATION_STATUSES = [
+  "pending",
+  "confirmed",
+  "ACCEPTED",
+  "PAYMENT_PENDING",
+  "CONFIRMED",
 ] as const
 
 type RideAmenity = (typeof RIDE_AMENITIES)[number]
@@ -707,6 +714,32 @@ export async function updateRide(req: AuthRequest, res: Response) {
       where: { id },
       data: updateData,
     })
+
+    const activeBookings = await prisma.booking.findMany({
+      where: {
+        rideId: updatedRide.id,
+        status: { in: [...ACTIVE_BOOKING_NOTIFICATION_STATUSES] },
+      },
+      select: {
+        passengerId: true,
+      },
+    })
+    const passengerIds = Array.from(
+      new Set(activeBookings.map((booking) => booking.passengerId))
+    )
+
+    if (passengerIds.length > 0) {
+      await notifyUsersByIds({
+        userIds: passengerIds,
+        title: "Ride updated",
+        body: `${updatedRide.fromCity} → ${updatedRide.toCity} details were updated`,
+        type: "ride_update",
+        data: {
+          rideId: updatedRide.id,
+          kind: "ride_updated",
+        },
+      })
+    }
 
     return res.json(attachRideTiming(updatedRide))
   } catch (err) {

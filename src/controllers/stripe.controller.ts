@@ -3,6 +3,7 @@ import Stripe from "stripe"
 import prisma from "../lib/prisma.js"
 import type { AuthRequest } from "../middleware/auth.js"
 import { notifyNearbyDriversForRideRequest } from "../lib/nearbyDriverNotifications.js"
+import { notifyUser } from "../lib/notifications.js"
 import { dispatchRideRequest } from "../lib/realtime.js"
 import { getStripeWebhookSecret, stripe } from "../lib/stripe.js"
 
@@ -328,6 +329,17 @@ async function handleJitRideRequestIntentSucceeded({
     },
   })
 
+  await notifyUser({
+    userId: passengerId,
+    title: "Ride request created",
+    body: `${createdRequest.fromCity} → ${createdRequest.toCity} request is now searching for drivers`,
+    type: "ride_update",
+    data: {
+      rideRequestId: createdRequest.id,
+      kind: "ride_request_created_jit",
+    },
+  })
+
   await dispatchJitRideRequest({
     eventId,
     paymentIntentId: intent.id,
@@ -373,6 +385,99 @@ type PaymentStatusUpdate = "succeeded" | "failed" | "refunded"
 type BookingStatusUpdate = "CONFIRMED" | "ACCEPTED"
 type BookingPaymentStatusUpdate = "paid" | "failed" | "refunded"
 
+async function notifyBookingPaymentUpdate(payload: {
+  paymentStatus: PaymentStatusUpdate
+  bookingId: string
+  rideId: string
+  passengerId: string
+  driverId: string
+  fromCity: string
+  toCity: string
+}) {
+  const routeLabel = `${payload.fromCity} → ${payload.toCity}`
+
+  if (payload.paymentStatus === "succeeded") {
+    await Promise.all([
+      notifyUser({
+        userId: payload.passengerId,
+        title: "Payment successful",
+        body: `${routeLabel} booking is confirmed`,
+        type: "payment",
+        data: {
+          bookingId: payload.bookingId,
+          rideId: payload.rideId,
+          kind: "booking_payment_succeeded",
+        },
+      }),
+      notifyUser({
+        userId: payload.driverId,
+        title: "Booking confirmed",
+        body: `${routeLabel} payment was received`,
+        type: "payment",
+        data: {
+          bookingId: payload.bookingId,
+          rideId: payload.rideId,
+          kind: "driver_booking_paid",
+        },
+      }),
+    ])
+    return
+  }
+
+  if (payload.paymentStatus === "failed") {
+    await Promise.all([
+      notifyUser({
+        userId: payload.passengerId,
+        title: "Payment failed",
+        body: `${routeLabel} payment failed. Please retry.`,
+        type: "payment",
+        data: {
+          bookingId: payload.bookingId,
+          rideId: payload.rideId,
+          kind: "booking_payment_failed",
+        },
+      }),
+      notifyUser({
+        userId: payload.driverId,
+        title: "Passenger payment failed",
+        body: `${routeLabel} payment did not complete`,
+        type: "payment",
+        data: {
+          bookingId: payload.bookingId,
+          rideId: payload.rideId,
+          kind: "driver_booking_payment_failed",
+        },
+      }),
+    ])
+    return
+  }
+
+  await Promise.all([
+    notifyUser({
+      userId: payload.passengerId,
+      title: "Refund processed",
+      body: `${routeLabel} refund was processed`,
+      type: "payment",
+      data: {
+        bookingId: payload.bookingId,
+        rideId: payload.rideId,
+        kind: "booking_refunded",
+      },
+    }),
+    notifyUser({
+      userId: payload.driverId,
+      title: "Booking refunded",
+      body: `${routeLabel} payment was refunded`,
+      type: "payment",
+      data: {
+        bookingId: payload.bookingId,
+        rideId: payload.rideId,
+        kind: "driver_booking_refunded",
+      },
+    }),
+  ])
+}
+
 async function handlePaymentIntentUpdate(
   args: {
     eventId: string
@@ -401,6 +506,15 @@ async function handlePaymentIntentUpdate(
           id: true,
           status: true,
           paymentStatus: true,
+          passengerId: true,
+          ride: {
+            select: {
+              id: true,
+              driverId: true,
+              fromCity: true,
+              toCity: true,
+            },
+          },
         },
       },
     },
@@ -496,4 +610,14 @@ async function handlePaymentIntentUpdate(
       bookingPaymentStatusTo: bookingPaymentStatus,
     })
   )
+
+  await notifyBookingPaymentUpdate({
+    paymentStatus,
+    bookingId: payment.booking.id,
+    rideId: payment.booking.ride.id,
+    passengerId: payment.booking.passengerId,
+    driverId: payment.booking.ride.driverId,
+    fromCity: payment.booking.ride.fromCity,
+    toCity: payment.booking.ride.toCity,
+  })
 }
