@@ -285,11 +285,13 @@ export async function sendMessage(req: AuthRequest, res: Response) {
       participantCheck.conversation.passengerId === req.userId
         ? participantCheck.conversation.driverId
         : participantCheck.conversation.passengerId
+    const senderName = message.sender.name?.trim() || "Someone"
+    const notificationBody = `${senderName}: ${preview}`
 
-    await notifyUser({
+    const notification = await notifyUser({
       userId: recipientId,
       title: "New message",
-      body: `You have a new message from ${message.sender.name}`,
+      body: notificationBody,
       type: "system",
       data: {
         conversationId,
@@ -297,6 +299,14 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         kind: "chat_message",
       },
     })
+
+    if (!notification) {
+      console.warn("chat notification dispatch failed", {
+        conversationId,
+        messageId: message.id,
+        recipientId,
+      })
+    }
 
     console.log("chat message saved", {
       conversationId,
@@ -313,30 +323,48 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         lastMessage: message,
       }
 
-      await pusherClient.trigger(conversationChannel, "message:new", {
-        message,
-      })
+      try {
+        await pusherClient.trigger(conversationChannel, "message:new", {
+          message,
+        })
 
-      console.log("pusher event sent", {
-        event: "message:new",
-        channel: conversationChannel,
-      })
+        console.log("pusher event sent", {
+          event: "message:new",
+          channel: conversationChannel,
+        })
 
-      const inboxChannels = [
-        `private-user-${participantCheck.conversation.passengerId}`,
-        `private-user-${participantCheck.conversation.driverId}`,
-      ]
+        const inboxChannels = [
+          `private-user-${participantCheck.conversation.passengerId}`,
+          `private-user-${participantCheck.conversation.driverId}`,
+        ]
 
-      await Promise.all(
-        inboxChannels.map((channel) =>
-          pusherClient.trigger(channel, "conversation:updated", inboxPayload)
-        )
-      )
+        await Promise.all([
+          ...inboxChannels.map((channel) =>
+            pusherClient.trigger(channel, "conversation:updated", inboxPayload)
+          ),
+          pusherClient.trigger(`private-user-${recipientId}`, "notification:new", {
+            title: "New message",
+            body: notificationBody,
+            type: "system",
+            data: {
+              conversationId,
+              messageId: message.id,
+              kind: "chat_message",
+            },
+          }),
+        ])
 
-      console.log("pusher event sent", {
-        event: "conversation:updated",
-        channels: inboxChannels,
-      })
+        console.log("pusher event sent", {
+          event: "conversation:updated",
+          channels: inboxChannels,
+        })
+      } catch (realtimeErr) {
+        console.error("chat realtime broadcast failed", {
+          conversationId,
+          messageId: message.id,
+          realtimeErr,
+        })
+      }
     }
 
     return res.status(201).json(message)
