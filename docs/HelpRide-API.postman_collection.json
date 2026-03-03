@@ -781,6 +781,67 @@
                         }
                     },
                     "response": []
+                },
+                {
+                    "name": "Get Driver Document Upload URL (Presign)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"type\": \"license\",\n  \"fileName\": \"license-front.jpg\",\n  \"mimeType\": \"image/jpeg\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/drivers/{{driverUserId}}/documents/presign",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "drivers",
+                                "{{driverUserId}}",
+                                "documents",
+                                "presign"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List Driver Uploaded Documents",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{accessToken}}"
+                            },
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{baseUrl}}/drivers/{{driverUserId}}/documents",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "drivers",
+                                "{{driverUserId}}",
+                                "documents"
+                            ]
+                        }
+                    },
+                    "response": []
                 }
             ]
         },
