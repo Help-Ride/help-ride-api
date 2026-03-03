@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js"
 import { firebaseAdmin, firebaseConfigured } from "./firebase.js"
+import { sendTextNotificationsSms } from "./twilio.js"
 
 type NotificationPayload = {
   userId: string
@@ -47,6 +48,35 @@ function serializeData(
   )
 }
 
+async function sendSmsToUserIds(userIds: string[], title: string, body: string) {
+  if (userIds.length === 0) {
+    return
+  }
+
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        phone: { not: null },
+        phoneVerified: true,
+      },
+      select: { phone: true },
+    })
+
+    const phones = Array.from(
+      new Set(
+        users
+          .map((user) => user.phone)
+          .filter((phone): phone is string => typeof phone === "string")
+      )
+    )
+
+    await sendTextNotificationsSms({ phones, title, body })
+  } catch (err) {
+    console.error("sms notification send error", err)
+  }
+}
+
 export async function notifyUser(payload: NotificationPayload) {
   try {
     const notification = await prisma.notification.create({
@@ -63,6 +93,7 @@ export async function notifyUser(payload: NotificationPayload) {
       body: payload.body,
       data: { notificationId: notification.id, ...(payload.data ?? {}) },
     })
+    await sendSmsToUserIds([payload.userId], payload.title, payload.body)
 
     return notification
   } catch (err) {
@@ -240,6 +271,7 @@ export async function notifyUsersByIds(payload: MultiUserPayload) {
         data: payload.data,
       }
     )
+    await sendSmsToUserIds(userIds, payload.title, payload.body)
 
     return { notified: userIds.length }
   } catch (err) {
@@ -286,6 +318,7 @@ export async function notifyUsersByRole(payload: BroadcastPayload) {
         data: payload.data,
       }
     )
+    await sendSmsToUserIds(userIds, payload.title, payload.body)
 
     return { notified: userIds.length }
   } catch (err) {

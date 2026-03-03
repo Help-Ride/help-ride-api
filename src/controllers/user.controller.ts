@@ -5,6 +5,7 @@ import { randomUUID } from "crypto"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { getDownloadUrl, getUploadUrl } from "../lib/s3.js"
+import { isValidE164Phone, normalizePhoneNumber } from "../lib/twilio.js"
 
 interface UpdateUserBody {
   name?: string
@@ -232,11 +233,41 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
       })
     }
 
+    const existingUser = await prisma.user.findUnique({
+      where: { id },
+      select: { phone: true },
+    })
+
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    let normalizedPhone: string | undefined
+    if (phone !== undefined) {
+      normalizedPhone = normalizePhoneNumber(phone)
+      if (!isValidE164Phone(normalizedPhone)) {
+        return res.status(400).json({
+          error: "phone must be in E.164 format (for example: +14165551234)",
+        })
+      }
+    }
+
+    const phoneChanged =
+      normalizedPhone !== undefined && normalizedPhone !== existingUser.phone
+
     const updated = await prisma.user.update({
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
-        ...(phone !== undefined ? { phone } : {}),
+        ...(normalizedPhone !== undefined ? { phone: normalizedPhone } : {}),
+        ...(phoneChanged
+          ? {
+              phoneVerified: false,
+              phoneVerifyOtp: null,
+              phoneVerifyOtpExpiresAt: null,
+              phoneVerifyOtpAttempts: 0,
+            }
+          : {}),
         ...(providerAvatarUrl !== undefined ? { providerAvatarUrl } : {}),
       },
       select: {
@@ -247,6 +278,7 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
         roleDefault: true,
         providerAvatarUrl: true,
         emailVerified: true,
+        phoneVerified: true,
         createdAt: true,
       },
     })

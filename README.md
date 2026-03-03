@@ -12,6 +12,7 @@ It powers Flutter clients for passengers and drivers, using PostgreSQL (Neon) + 
 - **ORM:** Prisma
 - **Auth:** JWT (access + refresh), email/password, OAuth (Google / Apple-ready)
 - **Email:** Resend (for email verification OTP)
+- **SMS:** Twilio (for phone OTP + text notifications)
 - **Storage:** AWS S3 (driver documents)
 - **Realtime:** Pusher (chat)
 - **Deployment:** Vercel (Serverless API)
@@ -81,6 +82,12 @@ JWT_REFRESH_SECRET="your-strong-refresh-secret"
 # Email (Resend)
 RESEND_API_KEY="re_xxx"
 EMAIL_FROM="HelpRide <noreply@exocodelabs.tech>"
+
+# SMS (Twilio)
+TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+TWILIO_AUTH_TOKEN="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+TWILIO_FROM_PHONE="+14165551234"
+TWILIO_SMS_NOTIFICATIONS_ENABLED=true
 
 # AWS S3 (Driver documents)
 AWS_S3_BUCKET="your-bucket-name"

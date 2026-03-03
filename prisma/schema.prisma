@@ -111,12 +111,15 @@ model User {
   roleDefault               RoleDefault      @default(passenger)
   providerAvatarUrl         String?
   emailVerified             Boolean          @default(false)
+  phoneVerified             Boolean          @default(false)
   stripeAccountId           String?          @unique
 
-  // 🔽 NEW FIELDS FOR EMAIL OTP
   emailVerifyOtp            String?
   emailVerifyOtpExpiresAt   DateTime?
   emailVerifyOtpAttempts    Int              @default(0)
+  phoneVerifyOtp            String?
+  phoneVerifyOtpExpiresAt   DateTime?
+  phoneVerifyOtpAttempts    Int              @default(0)
   passwordResetOtp          String?
   passwordResetOtpExpiresAt DateTime?
   passwordResetOtpAttempts  Int              @default(0)

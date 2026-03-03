@@ -19,6 +19,7 @@
 @paymentId =
 @supportTicketId =
 @email = patel.rishi3001@gmail.com
+@phone = +12269789548
 @otp = 332576
 @resetOtp = 112233
 @realtimeSecret = replace-with-REALTIME_TO_API_SECRET
@@ -135,12 +136,44 @@ Content-Type: application/json
 
 ###
 
+### SEND PHONE VERIFICATION OTP (SMS)
+POST {{baseUrl}}/auth/verify-phone/send-otp
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}"
+}
+
+###
+
+### VERIFY PHONE WITH OTP (SMS)
+# Replace {{otp}} with the 6-digit code from SMS.
+POST {{baseUrl}}/auth/verify-phone/verify-otp
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "otp": "{{otp}}"
+}
+
+###
+
 ### SEND PASSWORD RESET OTP
 POST {{baseUrl}}/auth/password-reset/send-otp
 Content-Type: application/json
 
 {
   "email": "{{email}}"
+}
+
+###
+
+### SEND PASSWORD RESET OTP (SMS)
+POST {{baseUrl}}/auth/password-reset/send-otp-phone
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}"
 }
 
 ###
@@ -152,6 +185,19 @@ Content-Type: application/json
 
 {
   "email": "{{email}}",
+  "otp": "{{resetOtp}}",
+  "newPassword": "NewStrongPass123!"
+}
+
+###
+
+### RESET PASSWORD WITH OTP (SMS)
+# Replace {{resetOtp}} with the 6-digit code from SMS.
+POST {{baseUrl}}/auth/password-reset/verify-otp-phone
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
   "otp": "{{resetOtp}}",
   "newPassword": "NewStrongPass123!"
 }

@@ -11,6 +11,13 @@ import {
 import { isAppReviewEmail } from "../lib/appReview.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { sendEmailVerificationOtp, sendPasswordResetOtp } from "../lib/email.js"
+import {
+  isValidE164Phone,
+  normalizePhoneNumber,
+  sendPasswordResetOtpSms,
+  sendPhoneVerificationOtpSms,
+  TwilioNotConfiguredError,
+} from "../lib/twilio.js"
 
 interface OAuthBody {
   provider: "google" | "apple"
@@ -49,9 +56,25 @@ interface ResetPasswordBody {
   newPassword: string
 }
 
+interface SendPhoneOtpBody {
+  phone: string
+}
+
+interface VerifyPhoneOtpBody {
+  phone: string
+  otp: string
+}
+
+interface ResetPasswordWithPhoneBody {
+  phone: string
+  otp: string
+  newPassword: string
+}
+
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 class LocationValidationError extends Error {}
+class PhoneValidationError extends Error {}
 
 function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex")
@@ -66,6 +89,21 @@ function parseNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function parsePhoneOrThrow(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new PhoneValidationError("phone is required")
+  }
+
+  const normalized = normalizePhoneNumber(value)
+  if (!isValidE164Phone(normalized)) {
+    throw new PhoneValidationError(
+      "phone must be in E.164 format (for example: +14165551234)"
+    )
+  }
+
+  return normalized
 }
 
 function isValidLatitude(value: number) {
@@ -175,6 +213,8 @@ async function buildAuthResponse(user: {
   id: string
   name: string
   email: string
+  phone: string | null
+  phoneVerified: boolean
   roleDefault: "passenger" | "driver"
   providerAvatarUrl: string | null
 }) {
@@ -203,6 +243,8 @@ async function buildAuthResponse(user: {
       id: user.id,
       name: user.name,
       email: user.email,
+      phone: user.phone,
+      phoneVerified: user.phoneVerified,
       roleDefault: resolvedRoleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
     },
@@ -425,6 +467,8 @@ export async function getMe(req: AuthRequest, res: Response) {
       id: user.id,
       name: user.name,
       email: user.email,
+      phone: user.phone,
+      phoneVerified: user.phoneVerified,
       roleDefault: user.roleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
       driverProfile: user.driverProfile,
@@ -694,6 +738,157 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
 }
 
 /**
+ * POST /api/auth/verify-phone/send-otp
+ * Body: { phone }
+ */
+export async function sendPhoneVerifyOtp(req: AuthRequest, res: Response) {
+  try {
+    const { phone } = (req.body ?? {}) as Partial<SendPhoneOtpBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(200).json({
+        message: "If an account exists for this phone, an OTP has been sent.",
+      })
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        phoneVerifyOtp: otp,
+        phoneVerifyOtpExpiresAt: expiresAt,
+        phoneVerifyOtpAttempts: 0,
+      },
+    })
+
+    await sendPhoneVerificationOtpSms({
+      phone: updated.phone ?? normalizedPhone,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Phone verification OTP sent.",
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/verify-phone/send-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/verify-phone/verify-otp
+ * Body: { phone, otp }
+ */
+export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
+  try {
+    const { phone, otp } = (req.body ?? {}) as Partial<VerifyPhoneOtpBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    if (!otp) {
+      return res.status(400).json({ error: "phone and otp are required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    if (
+      !user.phoneVerifyOtp ||
+      !user.phoneVerifyOtpExpiresAt ||
+      user.phoneVerifyOtpExpiresAt < new Date()
+    ) {
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          phoneVerifyOtp: newOtp,
+          phoneVerifyOtpExpiresAt: expiresAt,
+          phoneVerifyOtpAttempts: 0,
+        },
+      })
+
+      let smsSendFailed = false
+      try {
+        await sendPhoneVerificationOtpSms({
+          phone: user.phone ?? normalizedPhone,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (sendErr) {
+        console.error("Failed to resend phone verification OTP", sendErr)
+        smsSendFailed = true
+      }
+
+      if (smsSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
+    }
+
+    if (user.phoneVerifyOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
+    if (user.phoneVerifyOtp !== otp) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          phoneVerifyOtpAttempts: { increment: 1 },
+        },
+      })
+
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        phoneVerified: true,
+        phoneVerifyOtp: null,
+        phoneVerifyOtpExpiresAt: null,
+        phoneVerifyOtpAttempts: 0,
+      },
+    })
+
+    const response = await buildAuthResponse(updated)
+    return res.status(200).json(response)
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/verify-phone/verify-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
  * POST /api/auth/password-reset/send-otp
  * Body: { email }
  */
@@ -844,6 +1039,173 @@ export async function resetPasswordWithOtp(req: AuthRequest, res: Response) {
     return res.status(200).json({ message: "Password reset successful." })
   } catch (err) {
     console.error("POST /auth/password-reset/verify-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/send-otp-phone
+ * Body: { phone }
+ */
+export async function sendPasswordResetOtpPhone(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    const { phone } = (req.body ?? {}) as Partial<SendPhoneOtpBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(200).json({
+        message: "If an account exists for this phone, an OTP has been sent.",
+      })
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetOtp: otp,
+        passwordResetOtpExpiresAt: expiresAt,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    await sendPasswordResetOtpSms({
+      phone: updated.phone ?? normalizedPhone,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Password reset OTP sent.",
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/password-reset/send-otp-phone error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/verify-otp-phone
+ * Body: { phone, otp, newPassword }
+ */
+export async function resetPasswordWithOtpPhone(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    const { phone, otp, newPassword } = (req.body ??
+      {}) as Partial<ResetPasswordWithPhoneBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    if (!otp || !newPassword) {
+      return res
+        .status(400)
+        .json({ error: "phone, otp, and newPassword are required" })
+    }
+
+    if (newPassword.length < 8) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 8 characters long" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    if (
+      !user.passwordResetOtp ||
+      !user.passwordResetOtpExpiresAt ||
+      user.passwordResetOtpExpiresAt < new Date()
+    ) {
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtp: newOtp,
+          passwordResetOtpExpiresAt: expiresAt,
+          passwordResetOtpAttempts: 0,
+        },
+      })
+
+      let smsSendFailed = false
+      try {
+        await sendPasswordResetOtpSms({
+          phone: user.phone ?? normalizedPhone,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (sendErr) {
+        console.error("Failed to resend SMS password reset OTP", sendErr)
+        smsSendFailed = true
+      }
+
+      if (smsSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
+    }
+
+    if (user.passwordResetOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
+    if (user.passwordResetOtp !== otp) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtpAttempts: { increment: 1 },
+        },
+      })
+
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordResetOtp: null,
+        passwordResetOtpExpiresAt: null,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    return res.status(200).json({ message: "Password reset successful." })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/password-reset/verify-otp-phone error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
