@@ -31,6 +31,13 @@ const INVALID_TOKEN_ERRORS = new Set([
   "messaging/registration-token-not-registered",
 ])
 
+type PushDispatchResult = {
+  attemptedTokens: number
+  successCount: number
+  failureCount: number
+  invalidTokensDeleted: number
+}
+
 function serializeData(
   data?: Record<string, string | number | boolean>
 ): Record<string, string> | undefined {
@@ -71,9 +78,14 @@ export async function sendPushToUser(
     body: string
     data?: Record<string, string | number | boolean>
   }
-) {
+): Promise<PushDispatchResult> {
   if (!firebaseConfigured || !firebaseAdmin) {
-    return
+    return {
+      attemptedTokens: 0,
+      successCount: 0,
+      failureCount: 0,
+      invalidTokensDeleted: 0,
+    }
   }
 
   const tokens = await prisma.deviceToken.findMany({
@@ -82,10 +94,15 @@ export async function sendPushToUser(
   })
 
   if (tokens.length === 0) {
-    return
+    return {
+      attemptedTokens: 0,
+      successCount: 0,
+      failureCount: 0,
+      invalidTokensDeleted: 0,
+    }
   }
 
-  await sendPushToTokens(tokens.map((t) => t.token), payload)
+  return sendPushToTokens(tokens.map((t) => t.token), payload)
 }
 
 async function sendPushToTokens(
@@ -95,13 +112,20 @@ async function sendPushToTokens(
     body: string
     data?: Record<string, string | number | boolean>
   }
-) {
+): Promise<PushDispatchResult> {
   if (!firebaseConfigured || !firebaseAdmin || tokens.length === 0) {
-    return
+    return {
+      attemptedTokens: 0,
+      successCount: 0,
+      failureCount: 0,
+      invalidTokensDeleted: 0,
+    }
   }
 
   const data = serializeData(payload.data)
   const invalidTokens: string[] = []
+  let successCount = 0
+  let failureCount = 0
 
   for (let i = 0; i < tokens.length; i += 500) {
     const batch = tokens.slice(i, i + 500)
@@ -112,9 +136,47 @@ async function sendPushToTokens(
         body: payload.body,
       },
       data,
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+        },
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert",
+        },
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
     })
 
+    successCount += response.successCount
+    failureCount += response.failureCount
+
     if (response.failureCount > 0) {
+      const failureCodes = response.responses
+        .filter((result) => !result.success)
+        .map((result) => result.error?.code ?? "unknown")
+
+      const failureCodeSummary = failureCodes.reduce<Record<string, number>>(
+        (acc, code) => {
+          acc[code] = (acc[code] ?? 0) + 1
+          return acc
+        },
+        {}
+      )
+
+      console.error("FCM push failures detected", {
+        batchSize: batch.length,
+        failureCount: response.failureCount,
+        failureCodes: failureCodeSummary,
+      })
+
       response.responses.forEach((result, index) => {
         if (result.success) return
         const code = result.error?.code
@@ -129,6 +191,20 @@ async function sendPushToTokens(
     await prisma.deviceToken.deleteMany({
       where: { token: { in: invalidTokens } },
     })
+  }
+
+  if (successCount === 0 && failureCount > 0) {
+    console.warn("No push notification was delivered", {
+      attemptedTokens: tokens.length,
+      failureCount,
+    })
+  }
+
+  return {
+    attemptedTokens: tokens.length,
+    successCount,
+    failureCount,
+    invalidTokensDeleted: invalidTokens.length,
   }
 }
 

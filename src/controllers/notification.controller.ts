@@ -1,6 +1,7 @@
 // src/controllers/notification.controller.ts
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
+import { notifyUser } from "../lib/notifications.js"
 import { AuthRequest } from "../middleware/auth.js"
 
 const DEFAULT_PAGE_SIZE = 50
@@ -9,6 +10,13 @@ const MAX_PAGE_SIZE = 100
 interface RegisterDeviceTokenBody {
   token?: string
   platform?: "ios" | "android" | "web"
+}
+
+interface TriggerTestPushBody {
+  title?: string
+  body?: string
+  type?: "ride_update" | "payment" | "system"
+  data?: Record<string, string | number | boolean>
 }
 
 /**
@@ -74,7 +82,10 @@ export async function registerDeviceToken(req: AuthRequest, res: Response) {
     }
 
     const { token, platform } = (req.body ?? {}) as RegisterDeviceTokenBody
-    if (!token || typeof token !== "string") {
+    const normalizedToken =
+      typeof token === "string" ? token.trim() : undefined
+
+    if (!normalizedToken) {
       return res.status(400).json({ error: "token is required" })
     }
 
@@ -83,14 +94,14 @@ export async function registerDeviceToken(req: AuthRequest, res: Response) {
     }
 
     const saved = await prisma.deviceToken.upsert({
-      where: { token },
+      where: { token: normalizedToken },
       update: {
         userId: req.userId,
         platform: platform ?? undefined,
       },
       create: {
         userId: req.userId,
-        token,
+        token: normalizedToken,
         platform: platform ?? undefined,
       },
     })
@@ -113,12 +124,15 @@ export async function unregisterDeviceToken(req: AuthRequest, res: Response) {
     }
 
     const { token } = (req.body ?? {}) as RegisterDeviceTokenBody
-    if (!token || typeof token !== "string") {
+    const normalizedToken =
+      typeof token === "string" ? token.trim() : undefined
+
+    if (!normalizedToken) {
       return res.status(400).json({ error: "token is required" })
     }
 
     const removed = await prisma.deviceToken.deleteMany({
-      where: { userId: req.userId, token },
+      where: { userId: req.userId, token: normalizedToken },
     })
 
     return res.json({ removed: removed.count })
@@ -183,6 +197,75 @@ export async function markAllNotificationsRead(
     return res.json(updated)
   } catch (err) {
     console.error("POST /notifications/read-all error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/notifications/test-push
+ * Body: { title?, body?, type?, data? }
+ */
+export async function triggerTestPushNotification(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const { title, body, type, data } = (req.body ?? {}) as TriggerTestPushBody
+
+    if (typeof title !== "undefined" && (typeof title !== "string" || !title.trim())) {
+      return res.status(400).json({ error: "title must be a non-empty string" })
+    }
+
+    if (typeof body !== "undefined" && (typeof body !== "string" || !body.trim())) {
+      return res.status(400).json({ error: "body must be a non-empty string" })
+    }
+
+    if (type && !["ride_update", "payment", "system"].includes(type)) {
+      return res.status(400).json({ error: "Invalid notification type" })
+    }
+
+    if (typeof data !== "undefined") {
+      const isValidDataObject =
+        typeof data === "object" &&
+        data !== null &&
+        !Array.isArray(data) &&
+        Object.values(data).every(
+          (value) =>
+            typeof value === "string" ||
+            typeof value === "number" ||
+            typeof value === "boolean"
+        )
+
+      if (!isValidDataObject) {
+        return res.status(400).json({
+          error:
+            "data must be an object with string, number, or boolean values",
+        })
+      }
+    }
+
+    const notification = await notifyUser({
+      userId: req.userId,
+      title: title?.trim() || "Test notification",
+      body: body?.trim() || "This is a test push notification.",
+      type: type ?? "system",
+      data: data ?? { test: true },
+    })
+
+    if (!notification) {
+      return res.status(500).json({ error: "Failed to trigger test push" })
+    }
+
+    return res.status(201).json({
+      message: "Test notification triggered",
+      notification,
+    })
+  } catch (err) {
+    console.error("POST /notifications/test-push error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

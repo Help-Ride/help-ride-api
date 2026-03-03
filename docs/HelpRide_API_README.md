@@ -1996,6 +1996,41 @@ Response:
 
 ---
 
+### Trigger Test Push Notification
+
+`POST /notifications/test-push`
+
+```json
+{
+  "title": "Test push from API",
+  "body": "This is a manual test notification.",
+  "type": "system",
+  "data": {
+    "source": "manual-test",
+    "build": 1
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "message": "Test notification triggered",
+  "notification": {
+    "id": "notification-uuid",
+    "userId": "user-uuid",
+    "title": "Test push from API",
+    "body": "This is a manual test notification.",
+    "type": "system",
+    "isRead": false,
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+---
+
 ### Mark Notification Read
 
 `POST /notifications/{notificationId}/read`

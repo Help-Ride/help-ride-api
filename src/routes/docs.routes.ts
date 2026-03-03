@@ -59,6 +59,7 @@ type OpenApiOperation = {
 type DiscoveredRoute = {
   path: string
   method: string
+  requiresAuth?: boolean
 }
 
 const COLLECTION_PATH = path.join(process.cwd(), "docs", "HelpRide-API.postman_collection.json")
@@ -345,6 +346,28 @@ function normalizePathTemplate(inputPath: string) {
   return withParams || "/"
 }
 
+function normalizePathShape(inputPath: string) {
+  return normalizePathTemplate(inputPath).replace(/\{[\w.-]+\}/g, "{}")
+}
+
+function findMatchingPathKey(
+  paths: Record<string, Record<string, OpenApiOperation>>,
+  candidatePath: string
+) {
+  if (paths[candidatePath]) {
+    return candidatePath
+  }
+
+  const candidateShape = normalizePathShape(candidatePath)
+  for (const existingPath of Object.keys(paths)) {
+    if (normalizePathShape(existingPath) === candidateShape) {
+      return existingPath
+    }
+  }
+
+  return candidatePath
+}
+
 function getPathParams(pathTemplate: string) {
   const params: string[] = []
   const re = /\{([\w.-]+)\}/g
@@ -473,13 +496,17 @@ function mergeDiscoveredExpressRoutes(spec: {
   for (const route of discoveredRoutes) {
     const operationPath = normalizePathTemplate(route.path)
     const method = route.method.toLowerCase()
+    const targetPath = findMatchingPathKey(spec.paths, operationPath)
 
-    spec.paths[operationPath] ??= {}
-    if (spec.paths[operationPath][method]) {
+    spec.paths[targetPath] ??= {}
+    if (spec.paths[targetPath][method]) {
+      if (route.requiresAuth && !spec.paths[targetPath][method].security) {
+        spec.paths[targetPath][method].security = [{ bearerAuth: [] }]
+      }
       continue
     }
 
-    const inferredTag = inferTagFromPath(operationPath)
+    const inferredTag = inferTagFromPath(targetPath)
     const tagKey = inferredTag.toLowerCase()
     const tagName = tagNamesByKey.get(tagKey) ?? inferredTag
     if (!tagNamesByKey.has(tagKey)) {
@@ -488,7 +515,7 @@ function mergeDiscoveredExpressRoutes(spec: {
     }
 
     const operation: OpenApiOperation = {
-      summary: `Auto-discovered ${method.toUpperCase()} ${operationPath}`,
+      summary: `Auto-discovered ${method.toUpperCase()} ${targetPath}`,
       description: "Generated from the Express router so docs stay in sync with code.",
       tags: [tagName],
       responses: {
@@ -498,8 +525,12 @@ function mergeDiscoveredExpressRoutes(spec: {
       },
     }
 
+    if (route.requiresAuth) {
+      operation.security = [{ bearerAuth: [] }]
+    }
+
     const parameters: Array<Record<string, unknown>> = []
-    for (const pathParam of getPathParams(operationPath)) {
+    for (const pathParam of getPathParams(targetPath)) {
       parameters.push({
         name: pathParam,
         in: "path",
@@ -508,7 +539,7 @@ function mergeDiscoveredExpressRoutes(spec: {
       })
     }
 
-    if (operationPath.startsWith("/admin")) {
+    if (targetPath.startsWith("/admin")) {
       parameters.push({
         name: "x-admin-api-key",
         in: "header",
@@ -537,7 +568,7 @@ function mergeDiscoveredExpressRoutes(spec: {
       }
     }
 
-    spec.paths[operationPath][method] = operation
+    spec.paths[targetPath][method] = operation
   }
 
   spec.tags = tags.sort((a, b) => a.name.localeCompare(b.name))
@@ -562,7 +593,7 @@ function discoverExpressRoutes() {
   const deduped: DiscoveredRoute[] = []
   const seen = new Set<string>()
   for (const route of discovered) {
-    const key = `${route.method.toLowerCase()} ${normalizePathTemplate(route.path)}`
+    const key = `${route.method.toLowerCase()} ${normalizePathShape(route.path)}`
     if (seen.has(key)) {
       continue
     }
@@ -594,6 +625,12 @@ function collectRouterRoutes(
     const methods = Object.entries(layer.route.methods ?? {})
       .filter(([, enabled]) => Boolean(enabled))
       .map(([method]) => method.toLowerCase())
+    const requiresAuth = Array.isArray(layer.route.stack)
+      ? layer.route.stack.some((routeLayer: any) => {
+          const handlerName = routeLayer?.name || routeLayer?.handle?.name
+          return handlerName === "authGuard"
+        })
+      : false
 
     for (const routePath of routePaths) {
       if (typeof routePath !== "string") {
@@ -604,6 +641,7 @@ function collectRouterRoutes(
         into.push({
           path: fullPath,
           method,
+          requiresAuth,
         })
       }
     }

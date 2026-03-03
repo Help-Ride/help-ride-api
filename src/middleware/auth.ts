@@ -8,6 +8,11 @@ export interface AuthRequest extends Request {
 }
 
 export function authGuard(req: AuthRequest, res: Response, next: NextFunction) {
+  // Private API responses should not be cached by clients or intermediaries.
+  res.setHeader("Cache-Control", "no-store")
+  res.setHeader("Pragma", "no-cache")
+  res.setHeader("Vary", "Authorization")
+
   const header = req.headers.authorization
   if (!header?.startsWith("Bearer ")) {
     return res
