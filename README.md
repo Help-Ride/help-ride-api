@@ -116,6 +116,13 @@ PAYMENT_TAX_BPS=0
 # App
 NODE_ENV="development"        # or "production"
 PORT=4000                     # local dev port
+
+# Optional App Review email-verification bypass (strict allowlist)
+APP_REVIEW_BYPASS_EMAIL_VERIFICATION=false
+# Single email:
+APP_REVIEW_EMAIL="reviewer@example.com"
+# Or comma-separated list:
+# APP_REVIEW_EMAILS="reviewer1@example.com,reviewer2@example.com"
 ```
 
 Prisma uses `DATABASE_URL` to connect to Neon.

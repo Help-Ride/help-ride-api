@@ -8,6 +8,7 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from "../lib/jwt.js"
+import { isAppReviewEmail } from "../lib/appReview.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { sendEmailVerificationOtp, sendPasswordResetOtp } from "../lib/email.js"
 
@@ -319,6 +320,7 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         data: {
           name,
           passwordHash: hash,
+          emailVerified: existing.emailVerified || isAppReviewEmail(existing.email),
         },
       })
 
@@ -341,7 +343,7 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         email,
         passwordHash,
         roleDefault: "passenger",
-        emailVerified: false,
+        emailVerified: isAppReviewEmail(email),
       },
     })
 
@@ -365,7 +367,7 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "email and password are required" })
     }
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { email },
     })
 
@@ -380,6 +382,13 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
     }
 
     await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<LoginBody>)
+
+    if (!user.emailVerified && isAppReviewEmail(user.email)) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: true },
+      })
+    }
 
     const response = await buildAuthResponse(user)
     return res.status(200).json(response)

@@ -2212,6 +2212,11 @@ PAYMENT_PLATFORM_FEE_PCT=0.15
 REALTIME_BASE_URL=https://your-realtime-app.fly.dev
 REALTIME_TO_API_SECRET=rts_xxx
 # JWT_ACCESS_SECRET must match your Fly.io realtime service
+APP_REVIEW_BYPASS_EMAIL_VERIFICATION=false
+# Optional single review email allowlist:
+# APP_REVIEW_EMAIL=reviewer@example.com
+# Optional multi-email allowlist:
+# APP_REVIEW_EMAILS=reviewer1@example.com,reviewer2@example.com
 ```
 
 ---
