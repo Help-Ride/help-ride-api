@@ -261,6 +261,9 @@ model Payment {
   booking                Booking       @relation(fields: [bookingId], references: [id])
   bookingId              String
   paymentIntentId        String        @unique
+  driverTransferId       String?       @unique
+  driverTransferAmountCents Int?
+  driverTransferredAt    DateTime?
   amountCents            Int
   platformFeeCents       Int
   currency               String        @default("cad")

@@ -981,7 +981,7 @@ Content-Type: application/json
 ###
 
 ### 🔐 Get upload URL for driver document (registration alias -> ownership)
-POST {{baseUrl}}/drivers/{{userId}}/documents/presign
+POST {{baseUrl}}/drivers/me/documents/presign
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -994,7 +994,7 @@ Content-Type: application/json
 ###
 
 ### 📄 List my driver documents
-GET {{baseUrl}}/drivers/{{userId}}/documents
+GET {{baseUrl}}/drivers/me/documents
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
@@ -1044,10 +1044,10 @@ DELETE {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
 Authorization: Bearer {{accessToken}}
 
 ################################################
-### 💳 STRIPE PAYMENTS (PHASE 1: PLATFORM COLLECTION)
+### 💳 STRIPE PAYMENTS + CONNECT
 ################################################
-# Passenger funds go to HelpRide Stripe account.
-# Driver payouts are tracked in DB and settled manually.
+# Passenger funds are collected into HelpRide Stripe account.
+# Driver payouts are sent via Stripe Connect transfer from admin endpoint.
 
 ### CREATE PAYMENT INTENT (Passenger)
 POST {{baseUrl}}/payments/intent
@@ -1066,6 +1066,54 @@ Content-Type: application/json
 ### GET PAYMENT INTENT STATUS (Passenger/Driver)
 GET {{baseUrl}}/payments/intent/{{paymentIntentId}}
 Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### CREATE/REFRESH STRIPE CONNECT ONBOARDING LINK (DRIVER)
+POST {{baseUrl}}/stripe/connect/onboard
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### GET STRIPE CONNECT STATUS (DRIVER)
+GET {{baseUrl}}/stripe/connect/status
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### CREATE STRIPE EXPRESS DASHBOARD LOGIN LINK (DRIVER)
+POST {{baseUrl}}/stripe/connect/dashboard-link
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### RESET STRIPE CONNECT ACCOUNT + GET NEW ONBOARDING LINK (DRIVER, TEST ONLY)
+POST {{baseUrl}}/stripe/connect/reset
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "confirm": "RESET_STRIPE_CONNECT"
+}
+
+###
+
+# Set `state` from onboarding/refresh redirect URL query param
+@connectState =
+
+### STRIPE CONNECT REFRESH (PUBLIC REDIRECT ENDPOINT)
+GET {{baseUrl}}/stripe/connect/refresh?state={{connectState}}
+Accept: application/json
+
+###
+
+### STRIPE CONNECT RETURN (PUBLIC REDIRECT ENDPOINT)
+GET {{baseUrl}}/stripe/connect/return?state={{connectState}}&format=json
 Accept: application/json
 
 ###
@@ -1278,7 +1326,15 @@ Content-Type: application/json
 
 ###
 
+### PAY OUT DRIVER FOR PAYMENT (ADMIN)
+POST {{baseUrl}}/admin/payments/{{paymentId}}/payout
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
 ### REFUND PAYMENT (ADMIN)
+# Requires no existing driver payout transfer for the payment.
 POST {{baseUrl}}/admin/payments/{{paymentId}}/refund
 x-admin-api-key: {{adminApiKey}}
 Content-Type: application/json

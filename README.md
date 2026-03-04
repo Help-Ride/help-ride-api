@@ -104,6 +104,20 @@ PUSHER_CLUSTER="your-cluster"
 # Stripe
 STRIPE_SECRET_KEY="sk_test_..."
 STRIPE_WEBHOOK_SECRET="whsec_..."
+STRIPE_CONNECT_REFRESH_URL="https://api.example.com/api/stripe/connect/refresh"
+STRIPE_CONNECT_RETURN_URL="https://api.example.com/api/stripe/connect/return"
+# Recommended: dedicated secret for signed Stripe Connect state token
+STRIPE_CONNECT_STATE_SECRET="replace-with-strong-secret"
+# Optional app handoff URL (deep link / universal link target)
+# STRIPE_CONNECT_APP_RETURN_URL="https://app.example.com/stripe/return"
+# Optional (default: CA)
+# STRIPE_CONNECT_COUNTRY="CA"
+# Optional business profile prefill for Connect onboarding
+# STRIPE_CONNECT_BUSINESS_PROFILE_URL="https://helpride.com"
+# STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION="Ride-sharing transportation services through HelpRide app"
+# STRIPE_CONNECT_BUSINESS_PROFILE_MCC="4121"
+# Optional: enable /api/stripe/connect/reset endpoint (test keys only)
+# STRIPE_CONNECT_RESET_ENABLED=false
 PAYMENT_PLATFORM_FEE_PCT=0.15
 # Optional backward-compatible alias:
 # STRIPE_PLATFORM_FEE_PCT=0.15

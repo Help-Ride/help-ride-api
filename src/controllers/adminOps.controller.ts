@@ -2434,6 +2434,217 @@ export async function markPaymentPaidAdmin(req: Request, res: Response) {
   }
 }
 
+/**
+ * POST /api/admin/payments/:paymentId/payout
+ * Transfer driver earnings from platform balance to driver's connected Stripe account.
+ */
+export async function payoutPaymentToDriverAdmin(req: Request, res: Response) {
+  try {
+    const { paymentId } = req.params
+    if (!paymentId) {
+      return res.status(400).json({ error: "paymentId is required" })
+    }
+
+    const amountRaw = parseNumber((req.body ?? {}).amount)
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: {
+        booking: {
+          include: {
+            ride: {
+              select: {
+                id: true,
+                driverId: true,
+                fromCity: true,
+                toCity: true,
+              },
+            },
+          },
+        },
+      },
+    })
+    if (!payment) {
+      return res.status(404).json({ error: "Payment not found" })
+    }
+
+    if (payment.driverTransferId) {
+      return res.status(409).json({
+        error: "Driver payout already created for this payment",
+        payout: {
+          id: payment.driverTransferId,
+          amount: payment.driverTransferAmountCents,
+          transferredAt: payment.driverTransferredAt,
+        },
+      })
+    }
+
+    if (payment.status === "refunded") {
+      return res.status(409).json({
+        error: "Cannot pay out a refunded payment",
+      })
+    }
+
+    if (payment.status !== "paid" && payment.status !== "succeeded") {
+      return res.status(409).json({
+        error: "Payment must be paid before creating driver payout",
+      })
+    }
+
+    const driverEarningsCents = payment.amountCents - payment.platformFeeCents
+    if (!Number.isFinite(driverEarningsCents) || driverEarningsCents <= 0) {
+      return res.status(400).json({ error: "Driver payout amount must be positive" })
+    }
+
+    const requestedAmountCents =
+      amountRaw != null ? Math.round(amountRaw * 100) : driverEarningsCents
+    if (!Number.isFinite(requestedAmountCents) || requestedAmountCents <= 0) {
+      return res.status(400).json({
+        error: "amount must be a positive number",
+      })
+    }
+
+    if (requestedAmountCents !== driverEarningsCents) {
+      return res.status(400).json({
+        error: "Partial payouts are not supported",
+        expectedAmountCents: driverEarningsCents,
+      })
+    }
+
+    const transferAmountCents = driverEarningsCents
+
+    const driver = await prisma.user.findUnique({
+      where: { id: payment.booking.ride.driverId },
+      select: {
+        id: true,
+        stripeAccountId: true,
+        driverProfile: {
+          select: { id: true },
+        },
+      },
+    })
+
+    if (!driver || !driver.driverProfile) {
+      return res.status(409).json({
+        error: "Assigned driver profile is missing",
+      })
+    }
+
+    if (!driver.stripeAccountId) {
+      return res.status(409).json({
+        error: "Driver has not completed Stripe Connect onboarding",
+      })
+    }
+
+    const account = await stripe.accounts.retrieve(driver.stripeAccountId)
+    if ("deleted" in account && account.deleted) {
+      return res.status(409).json({
+        error: "Driver Stripe connected account was deleted. Re-onboard driver.",
+      })
+    }
+
+    if (!account.payouts_enabled || !account.details_submitted) {
+      return res.status(409).json({
+        error: "Driver Stripe account is not ready for payouts",
+        requirementsCurrentlyDue: account.requirements?.currently_due ?? [],
+        disabledReason: account.requirements?.disabled_reason ?? null,
+      })
+    }
+
+    let sourceTransactionId: string | undefined
+    try {
+      const paymentIntent = await stripe.paymentIntents.retrieve(
+        payment.paymentIntentId
+      )
+      sourceTransactionId =
+        typeof paymentIntent.latest_charge === "string"
+          ? paymentIntent.latest_charge
+          : paymentIntent.latest_charge?.id
+    } catch (stripeErr) {
+      if (!(stripeErr instanceof Stripe.errors.StripeInvalidRequestError)) {
+        throw stripeErr
+      }
+    }
+
+    const transfer = await stripe.transfers.create(
+      {
+        amount: transferAmountCents,
+        currency: payment.currency,
+        destination: driver.stripeAccountId,
+        ...(sourceTransactionId
+          ? {
+              source_transaction: sourceTransactionId,
+            }
+          : {}),
+        transfer_group: `booking:${payment.bookingId}`,
+        metadata: {
+          paymentId: payment.id,
+          bookingId: payment.bookingId,
+          driverId: payment.booking.ride.driverId,
+          paymentIntentId: payment.paymentIntentId,
+          source: "admin_manual_driver_payout",
+        },
+      },
+      {
+        idempotencyKey: `payment:${payment.id}:driver-payout`,
+      }
+    )
+
+    const transferredAt = transfer.created
+      ? new Date(transfer.created * 1000)
+      : new Date()
+
+    const updatedPayment = await prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        driverTransferId: transfer.id,
+        driverTransferAmountCents: transfer.amount,
+        driverTransferredAt: transferredAt,
+      },
+    })
+
+    await notifyUser({
+      userId: driver.id,
+      title: "Payout initiated",
+      body: `${payment.booking.ride.fromCity} → ${payment.booking.ride.toCity} payout is processing`,
+      type: "payment",
+      data: {
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        rideId: payment.booking.ride.id,
+        transferId: transfer.id,
+        kind: "driver_payout_initiated",
+      },
+    })
+
+    return res.json({
+      payment: serializePayment(updatedPayment),
+      payout: {
+        id: transfer.id,
+        amount: transfer.amount,
+        currency: transfer.currency,
+        destination:
+          typeof transfer.destination === "string"
+            ? transfer.destination
+            : transfer.destination?.id,
+        sourceTransactionId:
+          typeof transfer.source_transaction === "string"
+            ? transfer.source_transaction
+            : transfer.source_transaction?.id,
+        created: transfer.created,
+      },
+    })
+  } catch (err) {
+    console.error("POST /admin/payments/:paymentId/payout error", err)
+    if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+      return res.status(409).json({
+        error: "Stripe payout creation failed",
+        details: err.message,
+      })
+    }
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
 export async function refundPaymentAdmin(req: Request, res: Response) {
   try {
     const { paymentId } = req.params
@@ -2457,6 +2668,14 @@ export async function refundPaymentAdmin(req: Request, res: Response) {
 
     if (payment.status === "refunded") {
       return res.status(409).json({ error: "Payment already refunded" })
+    }
+
+    if (payment.driverTransferId) {
+      return res.status(409).json({
+        error:
+          "Cannot refund after driver payout transfer. Reverse transfer in Stripe first.",
+        transferId: payment.driverTransferId,
+      })
     }
 
     const requestedAmountCents =

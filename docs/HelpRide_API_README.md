@@ -925,10 +925,9 @@ Response:
 
 ## 💳 Stripe Payments
 
-Phase 1 uses platform-only collection:
-- Passenger card payments go to the HelpRide Stripe account.
-- Driver payouts are tracked internally and settled manually (e-Transfer/cash/off-platform).
-- Stripe Connect onboarding is disabled.
+Current flow:
+- Passenger card payments are collected into the HelpRide Stripe platform account.
+- Driver payouts are sent using Stripe Connect `transfer` from the platform balance.
 
 ### Create PaymentIntent (Passenger)
 
@@ -958,7 +957,7 @@ Notes:
 - Amount is computed server-side (distance/seat-based pricing model) and never accepted from client input.
 - If a booking already has a `stripePaymentIntentId`, the existing intent is reused (idempotency).
 - Booking transitions to `PAYMENT_PENDING` after intent creation/reuse.
-- Funds are collected into the HelpRide Stripe account (no direct transfer to driver).
+- Funds are collected into the HelpRide Stripe account; driver payout is a separate transfer step.
 
 ---
 
@@ -1005,6 +1004,136 @@ Listen for:
 - `payment_intent.succeeded` → booking `CONFIRMED` + payment status `paid`
 - `payment_intent.payment_failed` → booking `ACCEPTED` + payment status `failed`
 - `charge.refunded` → payment status `refunded`
+
+---
+
+### Stripe Connect Onboarding (Driver)
+
+`POST /stripe/connect/onboard`
+
+- Authenticated driver creates/reuses Stripe Express connected account.
+- Returns a one-time onboarding URL.
+- Backend signs a short-lived `state` token and embeds it into Stripe `refresh_url`/`return_url`.
+
+Response:
+
+```json
+{
+  "onboardingUrl": "https://connect.stripe.com/setup/...",
+  "expiresAt": 1735689600,
+  "stripeAccountId": "acct_...",
+  "detailsSubmitted": false,
+  "chargesEnabled": false,
+  "payoutsEnabled": false,
+  "onboardingComplete": false
+}
+```
+
+### Stripe Connect Status (Driver)
+
+`GET /stripe/connect/status`
+
+Response:
+
+```json
+{
+  "hasStripeAccount": true,
+  "statusSummary": "pending_verification",
+  "stripeAccountId": "acct_...",
+  "detailsSubmitted": true,
+  "chargesEnabled": true,
+  "payoutsEnabled": true,
+  "onboardingComplete": true,
+  "requirementsCurrentlyDue": [],
+  "requirementsPendingVerification": [],
+  "requirementsErrors": [],
+  "requirementsEventuallyDue": [],
+  "disabledReason": null
+}
+```
+
+Status notes:
+- `statusSummary = pending_verification` means Stripe is still reviewing submitted info; usually no user action is required.
+- `statusSummary = requires_information` means driver must reopen onboarding and provide missing details.
+
+### Stripe Express Dashboard Link (Driver)
+
+`POST /stripe/connect/dashboard-link`
+
+- Returns a login URL for driver Express dashboard access.
+
+### Stripe Connect Reset (Driver, Test Only)
+
+`POST /stripe/connect/reset`
+
+```json
+{
+  "confirm": "RESET_STRIPE_CONNECT"
+}
+```
+
+- Deletes current connected account in Stripe test mode (if exists).
+- Clears local `stripeAccountId`.
+- Creates a new connected account and returns a fresh onboarding URL.
+- Safety guards:
+  - Requires `STRIPE_CONNECT_RESET_ENABLED=true`
+  - Works only with `sk_test_...` API keys
+
+---
+
+### Stripe Connect Refresh Redirect (Public)
+
+`GET /stripe/connect/refresh?state=...`
+
+- Stripe calls this when onboarding link expires or user retries.
+- Endpoint validates signed state and redirects to a fresh Stripe onboarding link.
+
+### Stripe Connect Return Redirect (Public)
+
+`GET /stripe/connect/return?state=...`
+
+- Stripe redirects here when onboarding flow exits.
+- Returns HTML by default, or JSON with `?format=json`.
+- If `STRIPE_CONNECT_APP_RETURN_URL` is set, backend redirects there with status query params.
+
+---
+
+### Driver Payout Transfer (Admin)
+
+`POST /admin/payments/:paymentId/payout`
+
+- Creates Stripe Transfer from platform to driver connected account.
+- Transfers full net driver earnings (`amountCents - platformFeeCents`).
+- Prevents duplicate payout when a transfer already exists on that payment.
+- Admin refunds are blocked once a payout transfer exists (reverse transfer first).
+
+---
+
+### Stripe Dashboard Setup Checklist
+
+1. Enable Stripe Connect in your Stripe dashboard for your platform account.
+2. Use Express accounts for drivers.
+3. Set Connect redirect URLs to backend endpoints:
+   - `STRIPE_CONNECT_REFRESH_URL=https://api.yourdomain.com/api/stripe/connect/refresh`
+   - `STRIPE_CONNECT_RETURN_URL=https://api.yourdomain.com/api/stripe/connect/return`
+4. Add/update webhook endpoint: `POST /api/webhooks/stripe`.
+5. Subscribe webhook events:
+   - `payment_intent.succeeded`
+   - `payment_intent.payment_failed`
+   - `charge.refunded`
+6. Confirm your platform balance has funds available before calling admin payout transfer endpoint.
+7. Configure API environment variables:
+   - `STRIPE_SECRET_KEY`
+   - `STRIPE_WEBHOOK_SECRET`
+   - `STRIPE_CONNECT_REFRESH_URL`
+   - `STRIPE_CONNECT_RETURN_URL`
+   - `STRIPE_CONNECT_STATE_SECRET` (recommended)
+   - `STRIPE_CONNECT_COUNTRY` (optional, default `CA`)
+   - `STRIPE_CONNECT_APP_RETURN_URL` (optional app redirect)
+   - `STRIPE_CONNECT_BUSINESS_PROFILE_URL` (optional, can reduce website prompts)
+   - `STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION` (optional, default provided)
+   - `STRIPE_CONNECT_BUSINESS_PROFILE_MCC` (optional 4-digit industry code, can reduce industry prompts)
+   - `STRIPE_CONNECT_RESET_ENABLED` (optional, default false; test-only reset helper)
 
 ---
 
@@ -2128,7 +2257,7 @@ Response:
 
 ### Get Upload URL
 
-`POST /drivers/{userId}/documents/presign`
+`POST /drivers/me/documents/presign`
 
 ```json
 {
@@ -2160,7 +2289,7 @@ Response:
 
 ### List Documents
 
-`GET /drivers/{userId}/documents`
+`GET /drivers/me/documents`
 
 Response:
 
@@ -2206,6 +2335,20 @@ FIREBASE_CLIENT_EMAIL=...
 FIREBASE_PRIVATE_KEY=...
 STRIPE_SECRET_KEY=...
 STRIPE_WEBHOOK_SECRET=...
+STRIPE_CONNECT_REFRESH_URL=https://api.example.com/api/stripe/connect/refresh
+STRIPE_CONNECT_RETURN_URL=https://api.example.com/api/stripe/connect/return
+# recommended: dedicated secret for onboarding state token
+STRIPE_CONNECT_STATE_SECRET=...
+# optional (default: CA)
+# STRIPE_CONNECT_COUNTRY=CA
+# optional: deep-link/universal-link handoff URL for app
+# STRIPE_CONNECT_APP_RETURN_URL=https://app.example.com/stripe/return
+# optional: prefill business profile in onboarding
+# STRIPE_CONNECT_BUSINESS_PROFILE_URL=https://helpride.com
+# STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION=Ride-sharing transportation services through HelpRide app
+# STRIPE_CONNECT_BUSINESS_PROFILE_MCC=4121
+# optional: enable /api/stripe/connect/reset endpoint (test keys only)
+# STRIPE_CONNECT_RESET_ENABLED=false
 PAYMENT_PLATFORM_FEE_PCT=0.15
 # optional backward-compatible alias:
 # STRIPE_PLATFORM_FEE_PCT=0.15

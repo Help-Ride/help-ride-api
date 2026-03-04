@@ -34,6 +34,7 @@ import {
   listRideRequestsAdmin,
   listRidesAdmin,
   markPaymentPaidAdmin,
+  payoutPaymentToDriverAdmin,
   refundPaymentAdmin,
   requestAdditionalDriverDocumentAdmin,
   reviewDriverDocumentAdmin,
@@ -84,6 +85,7 @@ router.get("/payments/export", exportPaymentsAdmin)
 router.get("/payments", listPaymentsAdmin)
 router.get("/payments/:paymentId", getPaymentDetailsAdmin)
 router.put("/payments/:paymentId/mark-paid", markPaymentPaidAdmin)
+router.post("/payments/:paymentId/payout", payoutPaymentToDriverAdmin)
 router.post("/payments/:paymentId/refund", refundPaymentAdmin)
 
 router.get("/dashboard/stats", getDashboardStatsAdmin)
