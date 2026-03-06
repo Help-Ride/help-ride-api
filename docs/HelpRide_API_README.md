@@ -36,6 +36,7 @@ Dev:     https://dev-help-ride-api.vercel.app/api
 {
   "name": "Email User",
   "email": "user@example.com",
+  "phone": "+14165551234",
   "password": "StrongPass123!"
 }
 ```
@@ -48,6 +49,8 @@ Response:
     "id": "user-uuid",
     "name": "Email User",
     "email": "user@example.com",
+    "phone": "+14165551234",
+    "phoneVerified": false,
     "roleDefault": "passenger",
     "providerAvatarUrl": null
   },
@@ -58,7 +61,11 @@ Response:
 }
 ```
 
-Triggers email OTP verification.
+In the app flow, standard signup continues into SMS phone verification first.
+After the phone is verified, the user can enter the app immediately. Email can
+still be verified later from Profile or by using email OTP sign-in. Phone is
+required for standard signup so the user can receive ride-alert text messages.
+App-review allowlisted emails can still use the existing bypass flow unchanged.
 
 ---
 
@@ -81,6 +88,8 @@ Response:
     "id": "user-uuid",
     "name": "Email User",
     "email": "user@example.com",
+    "phone": "+14165551234",
+    "phoneVerified": false,
     "roleDefault": "passenger",
     "providerAvatarUrl": null
   },
@@ -90,6 +99,11 @@ Response:
   }
 }
 ```
+
+Passwordless login is also supported by calling the email OTP or phone OTP
+endpoints below, then exchanging the 6-digit code for tokens. A successful OTP
+sign-in is enough to enter the app; the client does not force a second OTP step
+after login.
 
 ---
 
@@ -132,6 +146,8 @@ Response:
     "id": "user-uuid",
     "name": "Email User",
     "email": "user@example.com",
+    "phone": "+14165551234",
+    "phoneVerified": false,
     "roleDefault": "passenger",
     "providerAvatarUrl": null
   },
@@ -141,6 +157,65 @@ Response:
   }
 }
 ```
+
+These email OTP endpoints can be used for either verification or passwordless
+email sign-in.
+
+---
+
+### Verify Phone (OTP)
+
+#### Send OTP
+
+`POST /auth/verify-phone/send-otp`
+
+```json
+{
+  "phone": "+14165551234"
+}
+```
+
+Response:
+
+```json
+{
+  "message": "Phone verification OTP sent."
+}
+```
+
+#### Verify OTP
+
+`POST /auth/verify-phone/verify-otp`
+
+```json
+{
+  "phone": "+14165551234",
+  "otp": "123456"
+}
+```
+
+Response:
+
+```json
+{
+  "user": {
+    "id": "user-uuid",
+    "name": "Email User",
+    "email": "user@example.com",
+    "phone": "+14165551234",
+    "phoneVerified": true,
+    "roleDefault": "passenger",
+    "providerAvatarUrl": null
+  },
+  "tokens": {
+    "accessToken": "<jwt>",
+    "refreshToken": "<jwt>"
+  }
+}
+```
+
+These phone OTP endpoints can be used for either verification or passwordless
+SMS sign-in.
 
 ---
 
@@ -2263,9 +2338,14 @@ Response:
   "roleDefault": "passenger",
   "providerAvatarUrl": null,
   "emailVerified": true,
+  "phoneVerified": false,
   "createdAt": "2025-01-01T00:00:00.000Z"
 }
 ```
+
+If the phone number changes, the backend clears `phoneVerified` and the user
+must verify the new number again before SMS ride alerts or SMS OTP login should
+be considered trusted.
 
 ---
 

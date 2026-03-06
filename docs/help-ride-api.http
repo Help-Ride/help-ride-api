@@ -51,13 +51,14 @@ Accept: application/json
 ################################################
 
 ### REGISTER WITH EMAIL/PASSWORD
-# Triggers an email OTP for verification.
+# Phone is required for standard signup and SMS ride alerts.
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
 {
   "name": "Email User",
   "email": "{{email}}",
+  "phone": "{{phone}}",
   "password": "StrongPass123!"
 }
 
@@ -65,7 +66,8 @@ Content-Type: application/json
 
 ### LOGIN WITH EMAIL/PASSWORD
 # Use same email/password as above.
-# Note: login sends OTP; tokens are returned by verify-otp.
+# Password login returns tokens immediately.
+# For passwordless sign-in, use the email or phone OTP endpoints below.
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
@@ -114,6 +116,7 @@ Content-Type: application/json
 ###
 
 ### RESEND EMAIL VERIFICATION OTP
+# Can also be used as a passwordless email sign-in step.
 POST {{baseUrl}}/auth/verify-email/send-otp
 Content-Type: application/json
 
@@ -125,7 +128,7 @@ Content-Type: application/json
 
 ### VERIFY EMAIL WITH OTP
 # Replace {{otp}} with the 6-digit code from your email.
-# Tokens are returned on success.
+# Tokens are returned on success for verification or passwordless login.
 POST {{baseUrl}}/auth/verify-email/verify-otp
 Content-Type: application/json
 
@@ -137,6 +140,7 @@ Content-Type: application/json
 ###
 
 ### SEND PHONE VERIFICATION OTP (SMS)
+# Can also be used as a passwordless SMS sign-in step.
 POST {{baseUrl}}/auth/verify-phone/send-otp
 Content-Type: application/json
 
@@ -148,6 +152,7 @@ Content-Type: application/json
 
 ### VERIFY PHONE WITH OTP (SMS)
 # Replace {{otp}} with the 6-digit code from SMS.
+# Tokens are returned on success for verification or passwordless login.
 POST {{baseUrl}}/auth/verify-phone/verify-otp
 Content-Type: application/json
 
@@ -253,12 +258,14 @@ Accept: application/json
 ###
 
 ### UPDATE OWN USER PROFILE
+# If `phone` changes, `phoneVerified` is reset until the new number is verified.
 PUT {{baseUrl}}/users/{{userId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "name": "Updated Name"
+  "name": "Updated Name",
+  "phone": "{{phone}}"
 }
 
 ###

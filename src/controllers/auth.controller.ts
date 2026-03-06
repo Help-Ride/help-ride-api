@@ -35,6 +35,7 @@ interface RegisterBody {
   name: string
   email: string
   password: string
+  phone?: string
 }
 
 interface LoginBody {
@@ -334,7 +335,8 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
  */
 export async function registerWithEmail(req: AuthRequest, res: Response) {
   try {
-    const { name, email, password } = (req.body ?? {}) as Partial<RegisterBody>
+    const { name, email, password, phone } = (req.body ??
+      {}) as Partial<RegisterBody>
 
     if (!name || !email || !password) {
       return res
@@ -348,21 +350,60 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         .json({ error: "Password must be at least 8 characters long" })
     }
 
+    const reviewBypass = isAppReviewEmail(email)
+    const requestedPhone =
+      typeof phone === "string" && phone.trim().length > 0
+        ? parsePhoneOrThrow(phone)
+        : null
+
     const existing = await prisma.user.findUnique({
       where: { email },
       include: { oauthAccounts: true },
     })
 
+    const effectivePhone = requestedPhone ?? existing?.phone ?? null
+
+    if (!reviewBypass && !effectivePhone) {
+      return res.status(400).json({
+        error: "phone is required for registration",
+      })
+    }
+
+    if (effectivePhone) {
+      const phoneOwner = await prisma.user.findUnique({
+        where: { phone: effectivePhone },
+        select: { id: true },
+      })
+
+      if (phoneOwner && phoneOwner.id !== existing?.id) {
+        return res.status(409).json({
+          error: "An account with this phone number already exists.",
+        })
+      }
+    }
+
     if (existing && !existing.passwordHash) {
       // Account exists via OAuth, allow them to set a password and use both
       const hash = await bcrypt.hash(password, 10)
+      const samePhone = existing.phone != null && existing.phone === effectivePhone
 
       const updated = await prisma.user.update({
         where: { id: existing.id },
         data: {
           name,
           passwordHash: hash,
-          emailVerified: existing.emailVerified || isAppReviewEmail(existing.email),
+          emailVerified: existing.emailVerified || reviewBypass,
+          ...(effectivePhone != null ? { phone: effectivePhone } : {}),
+          ...(effectivePhone != null
+            ? {
+                phoneVerified:
+                  reviewBypass ||
+                  (samePhone && existing.phoneVerified),
+                phoneVerifyOtp: null,
+                phoneVerifyOtpExpiresAt: null,
+                phoneVerifyOtpAttempts: 0,
+              }
+            : {}),
         },
       })
 
@@ -385,13 +426,20 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         email,
         passwordHash,
         roleDefault: "passenger",
-        emailVerified: isAppReviewEmail(email),
+        emailVerified: reviewBypass,
+        ...(effectivePhone != null ? { phone: effectivePhone } : {}),
+        ...(effectivePhone != null
+            ? { phoneVerified: reviewBypass }
+            : {}),
       },
     })
 
     const response = await buildAuthResponse(user)
     return res.status(201).json(response)
   } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
     console.error("POST /auth/register error", err)
     return res.status(500).json({ error: "Internal server error" })
   }

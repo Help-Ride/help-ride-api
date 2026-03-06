@@ -255,6 +255,19 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
     const phoneChanged =
       normalizedPhone !== undefined && normalizedPhone !== existingUser.phone
 
+    if (phoneChanged && normalizedPhone) {
+      const phoneOwner = await prisma.user.findUnique({
+        where: { phone: normalizedPhone },
+        select: { id: true },
+      })
+
+      if (phoneOwner && phoneOwner.id !== id) {
+        return res.status(409).json({
+          error: "An account with this phone number already exists.",
+        })
+      }
+    }
+
     const updated = await prisma.user.update({
       where: { id },
       data: {
