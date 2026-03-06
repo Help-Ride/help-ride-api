@@ -214,6 +214,8 @@ export async function listRideRequestOffers(req: AuthRequest, res: Response) {
             fromCity: true,
             toCity: true,
             startTime: true,
+            pricePerSeat: true,
+            seatsAvailable: true,
           },
         },
         driver: {
