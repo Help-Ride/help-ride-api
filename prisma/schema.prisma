@@ -210,6 +210,10 @@ model Ride {
   pricePerSeat    Decimal      @db.Decimal(10, 2)
   seatsTotal      Int
   seatsAvailable  Int
+  rideType        String       @default("one-time")
+  recurringSeriesId String?
+  recurrenceDays  String[]     @default([])
+  recurrenceEndDate DateTime?
   status          RideStatus   @default(open)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -218,6 +222,8 @@ model Ride {
   sosEvents       SosEvent[]
   conversations   Conversation[]
   rideRequestOffers RideRequestOffer[]
+
+  @@index([recurringSeriesId])
 }
 
 model FixedRoutePrice {

@@ -328,6 +328,14 @@ Content-Type: application/json
   "stops": ["Downtown", "Union Station"],
   "amenities": ["ac", "wifi", "music"],
   "additionalNotes": "Pickup near front entrance",
+  "rideType": "recurring",
+  "recurrenceDays": ["monday", "wednesday", "friday"],
+  "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
+  "occurrenceStartTimes": [
+    "2025-12-22T13:00:00.000Z",
+    "2025-12-24T13:00:00.000Z",
+    "2025-12-26T13:00:00.000Z"
+  ],
   "seatsTotal": 1,
   "pricePerSeat": 22
 }
@@ -369,6 +377,38 @@ Accept: application/json
 ### SEARCH RIDES (GEOLOCATION)
 GET {{baseUrl}}/rides?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25&seats=1
 Accept: application/json
+
+###
+
+### CREATE RECURRING RIDE (driver only)
+# `rideType` should be `recurring`. The API also treats recurrence metadata as a
+# recurring create request, so it will not silently downgrade to `one-time`.
+POST {{baseUrl}}/rides
+Authorization: Bearer {{driverAccessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-22T13:00:00.000Z",
+  "seatsTotal": 3,
+  "pricePerSeat": 22,
+  "rideType": "recurring",
+  "recurrenceDays": ["monday", "wednesday", "friday"],
+  "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
+  "occurrenceStartTimes": [
+    "2025-12-22T13:00:00.000Z",
+    "2025-12-24T13:00:00.000Z",
+    "2025-12-26T13:00:00.000Z"
+  ],
+  "stops": ["Downtown"],
+  "amenities": ["wifi"],
+  "additionalNotes": "Recurring commute"
+}
 
 ###
 

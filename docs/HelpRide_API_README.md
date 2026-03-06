@@ -409,11 +409,23 @@ app when creating or editing rides.
   "startTime": "2025-12-20T08:00:00.000Z",
   "arrivalTime": "2025-12-21T08:00:00.000Z",
   "seatsTotal": 1,
-  "rideType": "one-time",
-  "tripType": "one-way",
+  "rideType": "recurring",
+  "recurrenceDays": ["monday", "wednesday", "friday"],
+  "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
+  "occurrenceStartTimes": [
+    "2025-12-22T13:00:00.000Z",
+    "2025-12-24T13:00:00.000Z",
+    "2025-12-26T13:00:00.000Z"
+  ],
   "pricePerSeat": 22
 }
 ```
+
+`rideType` defaults to `one-time`. For recurring schedules, the client sends
+the generated `occurrenceStartTimes` plus the shared recurrence metadata. If a
+client accidentally omits `rideType` but still sends recurrence metadata, the
+API treats the request as recurring instead of silently downgrading it. The API
+creates one ride row per occurrence and links them with `recurringSeriesId`.
 
 Response:
 
@@ -432,6 +444,11 @@ Response:
   "pricePerSeat": 22,
   "seatsTotal": 1,
   "seatsAvailable": 1,
+  "rideType": "recurring",
+  "recurringSeriesId": "series-uuid",
+  "recurrenceDays": ["monday", "wednesday", "friday"],
+  "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
+  "createdCount": 3,
   "status": "open",
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z"

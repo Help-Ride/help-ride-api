@@ -1,4 +1,5 @@
 // src/controllers/ride.controller.ts
+import { randomUUID } from "node:crypto"
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
@@ -20,6 +21,10 @@ interface CreateRideBody {
   additionalNotes?: string | null
   pricePerSeat: number
   seatsTotal: number
+  rideType?: string
+  recurrenceDays?: string[] | null
+  recurrenceEndDate?: string | null
+  occurrenceStartTimes?: string[] | null
 }
 
 interface RidePricingPreviewBody {
@@ -42,6 +47,16 @@ const RIDE_AMENITIES = [
   "luggage_space",
   "child_seat",
 ] as const
+const RIDE_TYPES = ["one-time", "recurring"] as const
+const RIDE_RECURRENCE_DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+] as const
 const ACTIVE_BOOKING_NOTIFICATION_STATUSES = [
   "pending",
   "confirmed",
@@ -49,10 +64,14 @@ const ACTIVE_BOOKING_NOTIFICATION_STATUSES = [
   "PAYMENT_PENDING",
   "CONFIRMED",
 ] as const
+const MAX_RECURRING_RIDE_OCCURRENCES = 90
 
 type RideAmenity = (typeof RIDE_AMENITIES)[number]
+type RideType = (typeof RIDE_TYPES)[number]
 
 const RIDE_AMENITY_SET = new Set<string>(RIDE_AMENITIES)
+const RIDE_TYPE_SET = new Set<string>(RIDE_TYPES)
+const RIDE_RECURRENCE_DAY_SET = new Set<string>(RIDE_RECURRENCE_DAYS)
 
 function parseArrivalTime(
   value: unknown,
@@ -145,6 +164,146 @@ function parseAdditionalNotes(
   return { additionalNotes: notes.length > 0 ? notes : null }
 }
 
+function parseRideType(
+  value: unknown,
+  hasRecurringHints: boolean
+): { rideType: RideType } | { error: string } {
+  if (value == null || value === "") {
+    if (hasRecurringHints) {
+      return { rideType: "recurring" }
+    }
+    return { rideType: "one-time" }
+  }
+
+  if (typeof value !== "string") {
+    return { error: "rideType must be a string" }
+  }
+
+  const rideType = value.trim().toLowerCase()
+  if (!RIDE_TYPE_SET.has(rideType)) {
+    return {
+      error: `rideType must be one of: ${RIDE_TYPES.join(", ")}`,
+    }
+  }
+
+  if (rideType === "one-time" && hasRecurringHints) {
+    return { rideType: "recurring" }
+  }
+
+  return { rideType: rideType as RideType }
+}
+
+function parseRecurrenceDays(
+  value: unknown,
+  rideType: RideType
+): { recurrenceDays: string[] } | { error: string } {
+  if (rideType !== "recurring") {
+    return { recurrenceDays: [] }
+  }
+
+  if (!Array.isArray(value) || value.length === 0) {
+    return { error: "recurrenceDays must be a non-empty array for recurring rides" }
+  }
+
+  const normalized = Array.from(
+    new Set(
+      value
+        .map((day) => day?.toString().trim().toLowerCase() ?? "")
+        .filter((day) => day.length > 0)
+    )
+  )
+
+  const invalid = normalized.filter((day) => !RIDE_RECURRENCE_DAY_SET.has(day))
+  if (invalid.length > 0) {
+    return {
+      error: `Invalid recurrenceDays: ${invalid.join(", ")}. Allowed values: ${RIDE_RECURRENCE_DAYS.join(", ")}`,
+    }
+  }
+
+  return { recurrenceDays: normalized }
+}
+
+function parseRecurrenceEndDate(
+  value: unknown,
+  rideType: RideType,
+  firstOccurrence: Date
+): { recurrenceEndDate: Date | null } | { error: string } {
+  if (rideType !== "recurring") {
+    return { recurrenceEndDate: null }
+  }
+
+  if (value == null || value === "") {
+    return { error: "recurrenceEndDate is required for recurring rides" }
+  }
+
+  if (typeof value !== "string") {
+    return { error: "recurrenceEndDate must be a valid ISO date string" }
+  }
+
+  const recurrenceEndDate = new Date(value)
+  if (Number.isNaN(recurrenceEndDate.getTime())) {
+    return { error: "recurrenceEndDate must be a valid ISO date string" }
+  }
+
+  if (recurrenceEndDate < firstOccurrence) {
+    return { error: "recurrenceEndDate must be on or after the first occurrence" }
+  }
+
+  return { recurrenceEndDate }
+}
+
+function parseOccurrenceStartTimes(
+  value: unknown,
+  rideType: RideType,
+  firstOccurrence: Date,
+  recurrenceEndDate: Date | null
+): { occurrenceStartTimes: Date[] } | { error: string } {
+  if (rideType !== "recurring") {
+    return { occurrenceStartTimes: [firstOccurrence] }
+  }
+
+  if (!Array.isArray(value) || value.length === 0) {
+    return {
+      error: "occurrenceStartTimes must be a non-empty array for recurring rides",
+    }
+  }
+
+  const parsed = value.map((entry) => new Date(entry?.toString() ?? ""))
+  if (parsed.some((date) => Number.isNaN(date.getTime()))) {
+    return { error: "occurrenceStartTimes must contain valid ISO date strings" }
+  }
+
+  const deduped = Array.from(
+    new Set(parsed.map((date) => date.toISOString()))
+  )
+    .map((iso) => new Date(iso))
+    .sort((a, b) => a.getTime() - b.getTime())
+
+  if (deduped[0]?.toISOString() !== firstOccurrence.toISOString()) {
+    return {
+      error:
+        "occurrenceStartTimes must start with the same ISO timestamp provided in startTime",
+    }
+  }
+
+  if (
+    recurrenceEndDate != null &&
+    deduped.some((date) => date.getTime() > recurrenceEndDate.getTime())
+  ) {
+    return {
+      error: "occurrenceStartTimes can not contain dates after recurrenceEndDate",
+    }
+  }
+
+  if (deduped.length > MAX_RECURRING_RIDE_OCCURRENCES) {
+    return {
+      error: `Recurring rides are limited to ${MAX_RECURRING_RIDE_OCCURRENCES} occurrences per series`,
+    }
+  }
+
+  return { occurrenceStartTimes: deduped }
+}
+
 function attachRideTiming<T extends { startTime: Date }>(ride: T) {
   return {
     ...ride,
@@ -235,6 +394,7 @@ export async function createRide(req: AuthRequest, res: Response) {
     if (!req.userId) {
       return res.status(401).json({ error: "Unauthorized" })
     }
+    const driverId = req.userId
 
     const {
       fromCity,
@@ -250,6 +410,10 @@ export async function createRide(req: AuthRequest, res: Response) {
       additionalNotes,
       pricePerSeat,
       seatsTotal,
+      rideType,
+      recurrenceDays,
+      recurrenceEndDate,
+      occurrenceStartTimes,
     } = (req.body ?? {}) as Partial<CreateRideBody>
 
     // Basic validation
@@ -314,6 +478,43 @@ export async function createRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: additionalNotesResult.error })
     }
 
+    const hasRecurringHints =
+      recurrenceEndDate != null ||
+      (Array.isArray(recurrenceDays) && recurrenceDays.length > 0) ||
+      (Array.isArray(occurrenceStartTimes) && occurrenceStartTimes.length > 1)
+
+    const rideTypeResult = parseRideType(rideType, hasRecurringHints)
+    if ("error" in rideTypeResult) {
+      return res.status(400).json({ error: rideTypeResult.error })
+    }
+
+    const recurrenceDaysResult = parseRecurrenceDays(
+      recurrenceDays,
+      rideTypeResult.rideType
+    )
+    if ("error" in recurrenceDaysResult) {
+      return res.status(400).json({ error: recurrenceDaysResult.error })
+    }
+
+    const recurrenceEndDateResult = parseRecurrenceEndDate(
+      recurrenceEndDate,
+      rideTypeResult.rideType,
+      start
+    )
+    if ("error" in recurrenceEndDateResult) {
+      return res.status(400).json({ error: recurrenceEndDateResult.error })
+    }
+
+    const occurrenceStartTimesResult = parseOccurrenceStartTimes(
+      occurrenceStartTimes,
+      rideTypeResult.rideType,
+      start,
+      recurrenceEndDateResult.recurrenceEndDate
+    )
+    if ("error" in occurrenceStartTimesResult) {
+      return res.status(400).json({ error: occurrenceStartTimesResult.error })
+    }
+
     const pricing = await resolveSeatPrice({
       fromCity,
       toCity,
@@ -326,40 +527,68 @@ export async function createRide(req: AuthRequest, res: Response) {
       departureTime: start,
     })
 
-    const ride = await prisma.ride.create({
-      data: {
-        driverId: req.userId,
-        fromCity,
-        fromLat,
-        fromLng,
-        toCity,
-        toLat,
-        toLng,
-        startTime: start,
-        arrivalTime: arrivalTimeResult.arrivalTime,
-        stops: stopsResult.stops,
-        amenities: amenitiesResult.amenities,
-        additionalNotes: additionalNotesResult.additionalNotes,
-        pricePerSeat: pricing.pricePerSeat,
-        seatsTotal,
-        seatsAvailable: seatsTotal,
-        status: "open",
-      },
-    })
+    const seriesId =
+      rideTypeResult.rideType === "recurring" ? randomUUID() : null
+    const createdRides = await prisma.$transaction(
+      occurrenceStartTimesResult.occurrenceStartTimes.map((occurrenceStartTime) =>
+        prisma.ride.create({
+          data: {
+            driverId,
+            fromCity,
+            fromLat,
+            fromLng,
+            toCity,
+            toLat,
+            toLng,
+            startTime: occurrenceStartTime,
+            arrivalTime:
+              arrivalTimeResult.arrivalTime == null
+                ? null
+                : new Date(
+                    occurrenceStartTime.getTime() +
+                      (arrivalTimeResult.arrivalTime.getTime() - start.getTime())
+                  ),
+            stops: stopsResult.stops,
+            amenities: amenitiesResult.amenities,
+            additionalNotes: additionalNotesResult.additionalNotes,
+            pricePerSeat: pricing.pricePerSeat,
+            seatsTotal,
+            seatsAvailable: seatsTotal,
+            rideType: rideTypeResult.rideType,
+            recurringSeriesId: seriesId,
+            recurrenceDays: recurrenceDaysResult.recurrenceDays,
+            recurrenceEndDate: recurrenceEndDateResult.recurrenceEndDate,
+            status: "open",
+          },
+        })
+      )
+    )
+    const firstRide = createdRides[0]
 
     await notifyUsersByRole({
       role: "passenger",
       excludeUserId: req.userId,
-      title: "New ride available",
-      body: `${ride.fromCity} → ${ride.toCity} is now available`,
+      title:
+        rideTypeResult.rideType === "recurring"
+          ? "New recurring rides available"
+          : "New ride available",
+      body:
+        rideTypeResult.rideType === "recurring"
+          ? `${firstRide.fromCity} → ${firstRide.toCity} recurring rides are now available`
+          : `${firstRide.fromCity} → ${firstRide.toCity} is now available`,
       type: "ride_update",
       data: {
-        rideId: ride.id,
+        rideId: firstRide.id,
         kind: "ride_created",
       },
     })
 
-    return res.status(201).json(attachRideTiming(ride))
+    return res.status(201).json({
+      ...attachRideTiming(firstRide),
+      createdCount: createdRides.length,
+      createdRideIds: createdRides.map((ride) => ride.id),
+      recurringSeriesId: seriesId,
+    })
   } catch (err) {
     console.error("POST /api/rides error", err)
     return res.status(500).json({ error: "Internal server error" })
