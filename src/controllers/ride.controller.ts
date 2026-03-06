@@ -22,6 +22,18 @@ interface CreateRideBody {
   seatsTotal: number
 }
 
+interface RidePricingPreviewBody {
+  fromCity?: string
+  fromLat?: number
+  fromLng?: number
+  toCity?: string
+  toLat?: number
+  toLng?: number
+  startTime?: string
+  pricePerSeat?: number
+  seatsTotal?: number
+}
+
 const RIDE_AMENITIES = [
   "ac",
   "music",
@@ -137,6 +149,93 @@ function attachRideTiming<T extends { startTime: Date }>(ride: T) {
   return {
     ...ride,
     rideTiming: classifyRideTimingByDeparture(ride.startTime),
+  }
+}
+
+function hasPricingInputChanges(updates: Partial<CreateRideBody>) {
+  return (
+    updates.fromCity !== undefined ||
+    updates.fromLat !== undefined ||
+    updates.fromLng !== undefined ||
+    updates.toCity !== undefined ||
+    updates.toLat !== undefined ||
+    updates.toLng !== undefined ||
+    updates.startTime !== undefined ||
+    updates.pricePerSeat !== undefined ||
+    updates.seatsTotal !== undefined
+  )
+}
+
+export async function previewRidePricing(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const {
+      fromCity,
+      fromLat,
+      fromLng,
+      toCity,
+      toLat,
+      toLng,
+      startTime,
+      pricePerSeat,
+      seatsTotal,
+    } = (req.body ?? {}) as RidePricingPreviewBody
+
+    if (
+      !fromCity ||
+      fromLat == null ||
+      fromLng == null ||
+      !toCity ||
+      toLat == null ||
+      toLng == null ||
+      !startTime ||
+      pricePerSeat == null ||
+      seatsTotal == null
+    ) {
+      return res.status(400).json({ error: "Missing required pricing preview fields" })
+    }
+
+    if (
+      !Number.isFinite(fromLat) ||
+      !Number.isFinite(fromLng) ||
+      !Number.isFinite(toLat) ||
+      !Number.isFinite(toLng)
+    ) {
+      return res.status(400).json({ error: "Coordinates must be valid numbers" })
+    }
+
+    if (!Number.isFinite(pricePerSeat) || pricePerSeat < 0) {
+      return res.status(400).json({ error: "pricePerSeat must be a non-negative number" })
+    }
+
+    if (!Number.isInteger(seatsTotal) || seatsTotal <= 0) {
+      return res.status(400).json({ error: "seatsTotal must be a positive integer" })
+    }
+
+    const start = new Date(startTime)
+    if (Number.isNaN(start.getTime())) {
+      return res.status(400).json({ error: "Invalid startTime" })
+    }
+
+    const preview = await resolveSeatPrice({
+      fromCity,
+      toCity,
+      fromLat,
+      fromLng,
+      toLat,
+      toLng,
+      seats: seatsTotal,
+      basePricePerSeat: pricePerSeat,
+      departureTime: start,
+    })
+
+    return res.json(preview)
+  } catch (err) {
+    console.error("POST /api/rides/pricing-preview error", err)
+    return res.status(500).json({ error: "Internal server error" })
   }
 }
 
@@ -695,7 +794,11 @@ export async function updateRide(req: AuthRequest, res: Response) {
       updateData.seatsAvailable = newSeatsAvailable
     }
 
-    if (updates.pricePerSeat != null) {
+    if (hasPricingInputChanges(updates)) {
+      const pricingSeed =
+        updates.pricePerSeat != null
+          ? updates.pricePerSeat
+          : Number(ride.pricePerSeat)
       const pricing = await resolveSeatPrice({
         fromCity: updates.fromCity ?? ride.fromCity,
         toCity: updates.toCity ?? ride.toCity,
@@ -704,7 +807,7 @@ export async function updateRide(req: AuthRequest, res: Response) {
         toLat: updates.toLat ?? ride.toLat,
         toLng: updates.toLng ?? ride.toLng,
         seats: updates.seatsTotal ?? ride.seatsTotal,
-        basePricePerSeat: updates.pricePerSeat,
+        basePricePerSeat: pricingSeed,
         departureTime: effectiveStartTime,
       })
       updateData.pricePerSeat = pricing.pricePerSeat

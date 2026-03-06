@@ -291,19 +291,31 @@ Response:
 
 ### Pricing Rules (Ontario)
 
-The API resolves the final per-seat price on create/update using these rules:
+The API resolves the final per-seat price on create/update using a server-side
+market estimate. The client-provided `pricePerSeat` is treated as the driver's
+minimum desired price, not the final authoritative fare.
 
-1. Fixed route price (if configured)
-2. Ride timing classification based on departure lead time:
-   - `PREBOOKED`: ride created/updated at least 10 hours before departure
-   - `ONTIME`: ride created/updated within 2 hours of departure
-3. ONTIME uplift (+30%) if ride timing is `ONTIME`
-4. Minimum price protection (distance ≥ 55 km, seats ≤ 2, price < $20 → $20)
-5. Same-drop ceiling (same destination and distance ≥ 50 km → price ≤ $15)
-6. Upper safety cap (final price ≤ distance × $0.30)
+Resolution order:
 
-`pricePerSeat` in requests is treated as the base/desired value before rules apply.
-Ride responses include `rideTiming` (`PREBOOKED`, `ONTIME`, or `STANDARD`) for UI badges.
+1. Fixed route price wins if a configured route match exists.
+2. Otherwise the API estimates the trip total using:
+   - base fare
+   - distance (`km`)
+   - estimated duration (`minutes`)
+3. Ride timing classification is based on departure lead time:
+   - `PREBOOKED`: at least 10 hours before departure
+   - `ONTIME`: within 2 hours of departure
+   - `STANDARD`: everything else
+4. `ONTIME` rides receive a demand multiplier.
+5. The estimated trip total is shared across seats using a capped seat divisor.
+6. A minimum seat floor is enforced.
+7. Final per-seat price is:
+   - fixed route price, if present
+   - otherwise `max(driver input, market floor)`
+
+Ride responses include `rideTiming` (`PREBOOKED`, `ONTIME`, or `STANDARD`) for
+UI badges. The pricing preview endpoint returns the full breakdown used by the
+app when creating or editing rides.
 
 ---
 

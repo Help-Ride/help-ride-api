@@ -282,6 +282,27 @@ Content-Type: application/json
 ################################################
 
 ###########################################
+### 💸 RIDE PRICING PREVIEW (driver only)
+###########################################
+POST {{baseUrl}}/rides/pricing-preview
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "seatsTotal": 3,
+  "pricePerSeat": 0
+}
+
+###
+
+###########################################
 ### 🚗 CREATE RIDE  (requires driver token)
 ###########################################
 POST {{baseUrl}}/rides
