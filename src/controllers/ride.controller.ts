@@ -152,20 +152,6 @@ function attachRideTiming<T extends { startTime: Date }>(ride: T) {
   }
 }
 
-function hasPricingInputChanges(updates: Partial<CreateRideBody>) {
-  return (
-    updates.fromCity !== undefined ||
-    updates.fromLat !== undefined ||
-    updates.fromLng !== undefined ||
-    updates.toCity !== undefined ||
-    updates.toLat !== undefined ||
-    updates.toLng !== undefined ||
-    updates.startTime !== undefined ||
-    updates.pricePerSeat !== undefined ||
-    updates.seatsTotal !== undefined
-  )
-}
-
 export async function previewRidePricing(req: AuthRequest, res: Response) {
   try {
     if (!req.userId) {
@@ -699,8 +685,14 @@ export async function updateRide(req: AuthRequest, res: Response) {
       if (!Number.isFinite(updates.pricePerSeat)) {
         return res.status(400).json({ error: "pricePerSeat must be a valid number" })
       }
-      if (updates.pricePerSeat < 0) {
+      const requestedPrice = Number(updates.pricePerSeat)
+      if (requestedPrice < 0) {
         return res.status(400).json({ error: "pricePerSeat must be >= 0" })
+      }
+      if (Math.abs(requestedPrice - Number(ride.pricePerSeat)) >= 0.01) {
+        return res.status(409).json({
+          error: "pricePerSeat can not be changed after ride creation",
+        })
       }
     }
 
@@ -721,9 +713,6 @@ export async function updateRide(req: AuthRequest, res: Response) {
       ...(updates.toCity && { toCity: updates.toCity }),
       ...(updates.toLat != null && { toLat: updates.toLat }),
       ...(updates.toLng != null && { toLng: updates.toLng }),
-      ...(updates.pricePerSeat != null && {
-        pricePerSeat: updates.pricePerSeat,
-      }),
     }
 
     let effectiveStartTime = ride.startTime
@@ -792,25 +781,6 @@ export async function updateRide(req: AuthRequest, res: Response) {
         Math.min(newSeatsAvailable, updates.seatsTotal)
       )
       updateData.seatsAvailable = newSeatsAvailable
-    }
-
-    if (hasPricingInputChanges(updates)) {
-      const pricingSeed =
-        updates.pricePerSeat != null
-          ? updates.pricePerSeat
-          : Number(ride.pricePerSeat)
-      const pricing = await resolveSeatPrice({
-        fromCity: updates.fromCity ?? ride.fromCity,
-        toCity: updates.toCity ?? ride.toCity,
-        fromLat: updates.fromLat ?? ride.fromLat,
-        fromLng: updates.fromLng ?? ride.fromLng,
-        toLat: updates.toLat ?? ride.toLat,
-        toLng: updates.toLng ?? ride.toLng,
-        seats: updates.seatsTotal ?? ride.seatsTotal,
-        basePricePerSeat: pricingSeed,
-        departureTime: effectiveStartTime,
-      })
-      updateData.pricePerSeat = pricing.pricePerSeat
     }
 
     const updatedRide = await prisma.ride.update({

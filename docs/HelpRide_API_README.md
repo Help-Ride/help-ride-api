@@ -483,6 +483,9 @@ Response:
 
 `PUT /rides/{rideId}`
 
+`pricePerSeat` is immutable after a ride is created. If you need a different
+fare, create a new ride instead of updating the existing one.
+
 Response:
 
 ```json
@@ -1909,6 +1912,11 @@ Response:
 {
   "id": "conversation-uuid",
   "rideId": "ride-uuid",
+  "rideReference": "Ride #ABC12345",
+  "tripSummary": "Toronto → Waterloo",
+  "tripTime": "Mar 5, 9:30 PM",
+  "rideStatus": "open",
+  "ridePricePerSeat": 15,
   "passengerId": "passenger-uuid",
   "driverId": "driver-uuid",
   "lastMessageAt": null,
@@ -1926,6 +1934,16 @@ Response:
     "name": "Driver Name",
     "email": "driver@example.com",
     "providerAvatarUrl": null
+  },
+  "ride": {
+    "id": "ride-uuid",
+    "fromCity": "Toronto",
+    "toCity": "Waterloo",
+    "startTime": "2025-03-05T21:30:00.000Z",
+    "status": "open",
+    "pricePerSeat": 15,
+    "seatsTotal": 4,
+    "seatsAvailable": 2
   }
 }
 ```
@@ -1943,6 +1961,11 @@ Response:
   {
     "id": "conversation-uuid",
     "rideId": "ride-uuid",
+    "rideReference": "Ride #ABC12345",
+    "tripSummary": "Toronto → Waterloo",
+    "tripTime": "Mar 5, 9:30 PM",
+    "rideStatus": "open",
+    "ridePricePerSeat": 15,
     "passengerId": "passenger-uuid",
     "driverId": "driver-uuid",
     "lastMessageAt": "2025-01-01T02:00:00.000Z",
@@ -1960,6 +1983,16 @@ Response:
       "name": "Driver Name",
       "email": "driver@example.com",
       "providerAvatarUrl": null
+    },
+    "ride": {
+      "id": "ride-uuid",
+      "fromCity": "Toronto",
+      "toCity": "Waterloo",
+      "startTime": "2025-03-05T21:30:00.000Z",
+      "status": "open",
+      "pricePerSeat": 15,
+      "seatsTotal": 4,
+      "seatsAvailable": 2
     }
   }
 ]

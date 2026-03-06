@@ -329,6 +329,7 @@ Content-Type: application/json
 
 ###########################################
 ### ✏️ UPDATE RIDE (driver only)
+# `pricePerSeat` is locked after ride creation and should not be sent here.
 ###########################################
 PUT {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
@@ -346,8 +347,7 @@ Content-Type: application/json
   "stops": ["Downtown", "Union Station"],
   "amenities": ["wifi", "pet_friendly"],
   "additionalNotes": "Luggage space available",
-  "seatsTotal": 1,
-  "pricePerSeat": 22
+  "seatsTotal": 1
 }
 
 ###
@@ -386,6 +386,7 @@ Accept: application/json
 ###
 
 ### UPDATE RIDE (driver only)
+# `pricePerSeat` is locked after ride creation and should not be sent here.
 PUT {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -402,7 +403,6 @@ Content-Type: application/json
   "stops": ["Union Station"],
   "amenities": ["wifi", "child_seat"],
   "additionalNotes": "One small luggage allowed",
-  "pricePerSeat": 22.5,
   "seatsTotal": 4
 }
 
@@ -597,6 +597,14 @@ Content-Type: application/json
 GET {{baseUrl}}/chat/conversations
 Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+# Response now includes ride-linked context such as:
+# - rideReference
+# - tripSummary
+# - tripTime / tripTimeLabel
+# - rideStatus
+# - ridePricePerSeat
+# - nested ride object
 
 ###
 
