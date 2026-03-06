@@ -117,28 +117,28 @@ function getNonNegativeNumberEnv(name: string, fallback: number) {
 
 function getRidePricingConfig(): RidePricingConfig {
   return {
-    baseFare: getNonNegativeNumberEnv("RIDE_PRICING_BASE_FARE", 3.5),
-    perKmRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_KM_RATE", 0.65),
-    perMinuteRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_MIN_RATE", 0.18),
+    baseFare: getNonNegativeNumberEnv("RIDE_PRICING_BASE_FARE", 4.25),
+    perKmRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_KM_RATE", 0.78),
+    perMinuteRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_MIN_RATE", 0.22),
     minimumSeatPrice: getNonNegativeNumberEnv(
       "RIDE_PRICING_MIN_SEAT_PRICE",
-      6.5
+      8
     ),
     ontimeMarkupMultiplier: getPositiveNumberEnv(
       "RIDE_PRICING_ONTIME_MULTIPLIER",
-      1.15
+      1.18
     ),
     maxSharedSeatDivisor: getPositiveNumberEnv(
       "RIDE_PRICING_MAX_SHARED_DIVISOR",
-      2.5
+      2.2
     ),
     assumedAverageSpeedKmh: getPositiveNumberEnv(
       "RIDE_PRICING_ASSUMED_SPEED_KMH",
-      32
+      30
     ),
     minimumDurationMinutes: getPositiveNumberEnv(
       "RIDE_PRICING_MIN_DURATION_MINUTES",
-      8
+      10
     ),
   }
 }
