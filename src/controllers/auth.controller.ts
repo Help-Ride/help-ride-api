@@ -25,6 +25,7 @@ interface OAuthBody {
   email: string
   name: string
   avatarUrl?: string
+  identityToken?: string
   lat?: number | string
   lng?: number | string
   accuracyMeters?: number | string | null
@@ -90,6 +91,42 @@ function parseNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function parseNonEmptyString(value: unknown) {
+  if (typeof value !== "string") {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function decodeJwtPayload(token: string) {
+  const parts = token.split(".")
+  if (parts.length < 2) {
+    return null
+  }
+
+  try {
+    const payload = Buffer.from(parts[1], "base64url").toString("utf8")
+    const parsed = JSON.parse(payload)
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function extractAppleEmailFromIdentityToken(identityToken: unknown) {
+  const token = parseNonEmptyString(identityToken)
+  if (!token) {
+    return null
+  }
+
+  const payload = decodeJwtPayload(token)
+  return parseNonEmptyString(payload?.email)
 }
 
 function parsePhoneOrThrow(value: unknown) {
@@ -270,10 +307,18 @@ function generateEmailOtp() {
  */
 export async function oauthLogin(req: AuthRequest, res: Response) {
   try {
-    const { provider, providerUserId, email, name, avatarUrl } = (req.body ??
+    const {
+      provider,
+      providerUserId,
+      email,
+      name,
+      avatarUrl,
+      identityToken,
+    } = (req.body ??
       {}) as Partial<OAuthBody>
 
-    if (!provider || !providerUserId) {
+    const normalizedProviderUserId = parseNonEmptyString(providerUserId)
+    if (!provider || !normalizedProviderUserId) {
       return res.status(400).json({
         error: "provider and providerUserId are required",
       })
@@ -283,11 +328,19 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid provider" })
     }
 
+    const normalizedEmail = parseNonEmptyString(email)
+    const normalizedName = parseNonEmptyString(name)
+    const resolvedEmail =
+      normalizedEmail ??
+      (provider === "apple"
+        ? extractAppleEmailFromIdentityToken(identityToken)
+        : null)
+
     const existingOAuthAccount = await prisma.oAuthAccount.findUnique({
       where: {
         provider_providerUserId: {
           provider,
-          providerUserId,
+          providerUserId: normalizedProviderUserId,
         },
       },
       include: {
@@ -303,9 +356,7 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       }
 
       const shouldUpdateUser =
-        (typeof name === "string" &&
-          name.trim().length > 0 &&
-          name.trim() !== user.name) ||
+        (normalizedName != null && normalizedName !== user.name) ||
         (typeof avatarUrl === "string" &&
           avatarUrl.trim().length > 0 &&
           avatarUrl.trim() !== user.providerAvatarUrl)
@@ -314,9 +365,7 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
         user = await prisma.user.update({
           where: { id: user.id },
           data: {
-            ...(typeof name === "string" && name.trim().length > 0
-              ? { name: name.trim() }
-              : {}),
+            ...(normalizedName != null ? { name: normalizedName } : {}),
             ...(typeof avatarUrl === "string" && avatarUrl.trim().length > 0
               ? { providerAvatarUrl: avatarUrl.trim() }
               : {}),
@@ -324,33 +373,24 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
         })
       }
 
-      if (
-        typeof email === "string" &&
-        email.trim().length > 0 &&
-        email.trim() !== existingOAuthAccount.providerEmail
-      ) {
+      if (resolvedEmail != null && resolvedEmail !== existingOAuthAccount.providerEmail) {
         await prisma.oAuthAccount.update({
           where: { id: existingOAuthAccount.id },
-          data: { providerEmail: email.trim() },
+          data: { providerEmail: resolvedEmail },
         })
       }
     } else {
-      if (!email || !name) {
+      if (!resolvedEmail || !normalizedName) {
         return res.status(400).json({
-          error: "email and name are required for first-time OAuth sign-in",
-        })
-      }
-
-      const normalizedEmail = email.trim()
-      const normalizedName = name.trim()
-      if (!normalizedEmail || !normalizedName) {
-        return res.status(400).json({
-          error: "email and name are required for first-time OAuth sign-in",
+          error:
+            provider === "apple"
+              ? "Apple did not return an email address for this sign-in. Remove Help Ride from Sign in with Apple in your Apple ID settings, then try again."
+              : "email and name are required for first-time OAuth sign-in",
         })
       }
 
       const existingUser = await prisma.user.findUnique({
-        where: { email: normalizedEmail },
+        where: { email: resolvedEmail },
       })
 
       user =
@@ -367,7 +407,7 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
             })
           : await prisma.user.create({
               data: {
-                email: normalizedEmail,
+                email: resolvedEmail,
                 name: normalizedName,
                 providerAvatarUrl:
                   typeof avatarUrl === "string" && avatarUrl.trim().length > 0
@@ -381,8 +421,8 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       await prisma.oAuthAccount.create({
         data: {
           provider,
-          providerUserId,
-          providerEmail: normalizedEmail,
+          providerUserId: normalizedProviderUserId,
+          providerEmail: resolvedEmail,
           userId: user.id,
         },
       })

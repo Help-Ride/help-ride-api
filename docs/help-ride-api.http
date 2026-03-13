@@ -235,6 +235,7 @@ Content-Type: application/json
 ###
 
 ### OAUTH LOGIN (APPLE)
+# Include `identityToken` from the native Apple credential when available.
 POST {{baseUrl}}/auth/oauth
 Content-Type: application/json
 
@@ -242,7 +243,8 @@ Content-Type: application/json
   "provider": "apple",
   "providerUserId": "apple-user-1234567890",
   "email": "private-relay@example.com",
-  "name": "Apple User"
+  "name": "Apple User",
+  "identityToken": "eyJhbGciOi..."
 }
 
 ###
