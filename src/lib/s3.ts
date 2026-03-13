@@ -1,6 +1,7 @@
 // src/lib/s3.ts
 import {
   S3Client,
+  DeleteObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
 } from "@aws-sdk/client-s3"
@@ -40,4 +41,13 @@ export async function getDownloadUrl(key: string, expiresInSeconds = 900) {
   return getSignedUrl(s3, command, {
     expiresIn: expiresInSeconds,
   })
+}
+
+export async function deleteObject(key: string) {
+  const command = new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  })
+
+  await s3.send(command)
 }

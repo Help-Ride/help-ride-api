@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs"
 import { randomUUID } from "crypto"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { getDownloadUrl, getUploadUrl } from "../lib/s3.js"
+import { deleteObject, getDownloadUrl, getUploadUrl } from "../lib/s3.js"
 import { isValidE164Phone, normalizePhoneNumber } from "../lib/twilio.js"
 
 interface UpdateUserBody {
@@ -28,6 +28,68 @@ interface UpdateMyLocationBody {
 interface PresignUserAvatarBody {
   fileName?: string
   mimeType?: string
+}
+
+const TERMINAL_BOOKING_STATUSES = [
+  "cancelled_by_passenger",
+  "cancelled_by_driver",
+  "completed",
+] as const
+const TERMINAL_RIDE_STATUSES = ["completed", "cancelled"] as const
+const TERMINAL_RIDE_REQUEST_STATUSES = [
+  "CANCELLED",
+  "EXPIRED",
+  "cancelled",
+  "expired",
+] as const
+const TERMINAL_RIDE_REQUEST_OFFER_STATUSES = [
+  "REJECTED",
+  "EXPIRED",
+  "rejected",
+  "cancelled",
+] as const
+
+function buildDeletedEmail(userId: string) {
+  return `deleted-${userId}-${Date.now()}@help-ride.invalid`
+}
+
+function extractAvatarS3Key(userId: string, rawUrl: string | null | undefined) {
+  const value = rawUrl?.trim()
+  if (!value) return null
+
+  if (value.startsWith(`users/${userId}/avatar/`)) {
+    return value
+  }
+
+  try {
+    const parsed = new URL(value, "https://help-ride.invalid")
+    const key = parsed.searchParams.get("key")?.trim()
+    if (!key) return null
+    return decodeURIComponent(key)
+  } catch {
+    return null
+  }
+}
+
+function getDeletionReasonsMessage(reasons: string[]) {
+  const labels = reasons.map((reason) => {
+    switch (reason) {
+      case "active_booking":
+        return "active bookings"
+      case "active_ride":
+        return "active rides"
+      case "active_ride_request":
+        return "active ride requests"
+      case "active_ride_request_offer":
+        return "active ride request offers"
+      case "pending_driver_transfer":
+        return "pending driver payouts"
+      default:
+        return reason.replaceAll("_", " ")
+    }
+  })
+
+  return `Resolve ${labels.join(", ")} before deleting your account.`
 }
 
 function parseNumber(value: unknown) {
@@ -299,6 +361,178 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
     return res.json(updated)
   } catch (err) {
     console.error("PUT /users/:id error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * DELETE /api/users/me
+ * Authenticated user can permanently delete their own account.
+ */
+export async function deleteMyAccount(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const userId = req.userId
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        providerAvatarUrl: true,
+        stripeAccountId: true,
+      },
+    })
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    const [
+      activeBookingsCount,
+      activeRidesCount,
+      activeRideRequestsCount,
+      activeRideRequestOffersCount,
+      pendingDriverTransfersCount,
+      driverDocuments,
+    ] = await prisma.$transaction([
+      prisma.booking.count({
+        where: {
+          passengerId: userId,
+          status: { notIn: [...TERMINAL_BOOKING_STATUSES] },
+        },
+      }),
+      prisma.ride.count({
+        where: {
+          driverId: userId,
+          status: { notIn: [...TERMINAL_RIDE_STATUSES] },
+        },
+      }),
+      prisma.rideRequest.count({
+        where: {
+          OR: [
+            {
+              passengerId: userId,
+              status: { notIn: [...TERMINAL_RIDE_REQUEST_STATUSES] },
+            },
+            {
+              driverId: userId,
+              status: { notIn: [...TERMINAL_RIDE_REQUEST_STATUSES] },
+            },
+          ],
+        },
+      }),
+      prisma.rideRequestOffer.count({
+        where: {
+          driverId: userId,
+          status: { notIn: [...TERMINAL_RIDE_REQUEST_OFFER_STATUSES] },
+        },
+      }),
+      prisma.payment.count({
+        where: {
+          status: "succeeded",
+          driverTransferredAt: null,
+          booking: {
+            ride: {
+              driverId: userId,
+            },
+          },
+        },
+      }),
+      prisma.driverDocument.findMany({
+        where: { userId },
+        select: { s3Key: true },
+      }),
+    ])
+
+    const reasons: string[] = []
+    if (activeBookingsCount > 0) reasons.push("active_booking")
+    if (activeRidesCount > 0) reasons.push("active_ride")
+    if (activeRideRequestsCount > 0) reasons.push("active_ride_request")
+    if (activeRideRequestOffersCount > 0) {
+      reasons.push("active_ride_request_offer")
+    }
+    if (pendingDriverTransfersCount > 0) {
+      reasons.push("pending_driver_transfer")
+    }
+
+    if (reasons.length > 0) {
+      return res.status(409).json({
+        error: getDeletionReasonsMessage(reasons),
+        reasons,
+      })
+    }
+
+    const keysToDelete = new Set<string>()
+    const avatarKey = extractAvatarS3Key(userId, user.providerAvatarUrl)
+    if (avatarKey) {
+      keysToDelete.add(avatarKey)
+    }
+    for (const document of driverDocuments) {
+      const key = document.s3Key.trim()
+      if (key) {
+        keysToDelete.add(key)
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.refreshToken.deleteMany({
+        where: { userId },
+      })
+      await tx.oAuthAccount.deleteMany({
+        where: { userId },
+      })
+      await tx.deviceToken.deleteMany({
+        where: { userId },
+      })
+      await tx.notification.deleteMany({
+        where: { userId },
+      })
+      await tx.userLocation.deleteMany({
+        where: { userId },
+      })
+      await tx.driverDocument.deleteMany({
+        where: { userId },
+      })
+      await tx.driverProfile.deleteMany({
+        where: { userId },
+      })
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          deletedAt: new Date(),
+          email: buildDeletedEmail(userId),
+          name: "Deleted User",
+          phone: null,
+          passwordHash: null,
+          providerAvatarUrl: null,
+          emailVerified: false,
+          phoneVerified: false,
+          stripeAccountId: null,
+          emailVerifyOtp: null,
+          emailVerifyOtpExpiresAt: null,
+          emailVerifyOtpAttempts: 0,
+          phoneVerifyOtp: null,
+          phoneVerifyOtpExpiresAt: null,
+          phoneVerifyOtpAttempts: 0,
+          passwordResetOtp: null,
+          passwordResetOtpExpiresAt: null,
+          passwordResetOtpAttempts: 0,
+        },
+      })
+    })
+
+    await Promise.allSettled(
+      [...keysToDelete].map(async (key) => {
+        await deleteObject(key)
+      })
+    )
+
+    return res.status(200).json({ message: "Account deleted successfully." })
+  } catch (err) {
+    console.error("DELETE /users/me error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

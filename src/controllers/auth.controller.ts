@@ -216,6 +216,7 @@ async function buildAuthResponse(user: {
   email: string
   phone: string | null
   phoneVerified: boolean
+  emailVerified: boolean
   roleDefault: "passenger" | "driver"
   providerAvatarUrl: string | null
 }) {
@@ -246,6 +247,7 @@ async function buildAuthResponse(user: {
       email: user.email,
       phone: user.phone,
       phoneVerified: user.phoneVerified,
+      emailVerified: user.emailVerified,
       roleDefault: resolvedRoleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
     },
@@ -271,9 +273,9 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
     const { provider, providerUserId, email, name, avatarUrl } = (req.body ??
       {}) as Partial<OAuthBody>
 
-    if (!provider || !providerUserId || !email || !name) {
+    if (!provider || !providerUserId) {
       return res.status(400).json({
-        error: "provider, providerUserId, email, and name are required",
+        error: "provider and providerUserId are required",
       })
     }
 
@@ -281,40 +283,110 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid provider" })
     }
 
-    // Upsert user by email
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        name,
-        providerAvatarUrl: avatarUrl ?? undefined,
-      },
-      create: {
-        email,
-        name,
-        providerAvatarUrl: avatarUrl ?? undefined,
-        roleDefault: "passenger",
-        emailVerified: true, // for OAuth we can consider them verified
-      },
-    })
-
-    // Upsert OAuth account
-    await prisma.oAuthAccount.upsert({
+    const existingOAuthAccount = await prisma.oAuthAccount.findUnique({
       where: {
         provider_providerUserId: {
           provider,
           providerUserId,
         },
       },
-      update: {
-        providerEmail: email,
-      },
-      create: {
-        provider,
-        providerUserId,
-        providerEmail: email,
-        userId: user.id,
+      include: {
+        user: true,
       },
     })
+
+    let user = existingOAuthAccount?.user ?? null
+
+    if (existingOAuthAccount) {
+      if (!user || user.deletedAt) {
+        return res.status(401).json({ error: "OAuth account is unavailable" })
+      }
+
+      const shouldUpdateUser =
+        (typeof name === "string" &&
+          name.trim().length > 0 &&
+          name.trim() !== user.name) ||
+        (typeof avatarUrl === "string" &&
+          avatarUrl.trim().length > 0 &&
+          avatarUrl.trim() !== user.providerAvatarUrl)
+
+      if (shouldUpdateUser) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            ...(typeof name === "string" && name.trim().length > 0
+              ? { name: name.trim() }
+              : {}),
+            ...(typeof avatarUrl === "string" && avatarUrl.trim().length > 0
+              ? { providerAvatarUrl: avatarUrl.trim() }
+              : {}),
+          },
+        })
+      }
+
+      if (
+        typeof email === "string" &&
+        email.trim().length > 0 &&
+        email.trim() !== existingOAuthAccount.providerEmail
+      ) {
+        await prisma.oAuthAccount.update({
+          where: { id: existingOAuthAccount.id },
+          data: { providerEmail: email.trim() },
+        })
+      }
+    } else {
+      if (!email || !name) {
+        return res.status(400).json({
+          error: "email and name are required for first-time OAuth sign-in",
+        })
+      }
+
+      const normalizedEmail = email.trim()
+      const normalizedName = name.trim()
+      if (!normalizedEmail || !normalizedName) {
+        return res.status(400).json({
+          error: "email and name are required for first-time OAuth sign-in",
+        })
+      }
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      })
+
+      user =
+        existingUser != null
+          ? await prisma.user.update({
+              where: { id: existingUser.id },
+              data: {
+                name: normalizedName,
+                ...(typeof avatarUrl === "string" && avatarUrl.trim().length > 0
+                  ? { providerAvatarUrl: avatarUrl.trim() }
+                  : {}),
+                emailVerified: true,
+              },
+            })
+          : await prisma.user.create({
+              data: {
+                email: normalizedEmail,
+                name: normalizedName,
+                providerAvatarUrl:
+                  typeof avatarUrl === "string" && avatarUrl.trim().length > 0
+                    ? avatarUrl.trim()
+                    : undefined,
+                roleDefault: "passenger",
+                emailVerified: true,
+              },
+            })
+
+      await prisma.oAuthAccount.create({
+        data: {
+          provider,
+          providerUserId,
+          providerEmail: normalizedEmail,
+          userId: user.id,
+        },
+      })
+    }
 
     await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<OAuthBody>)
 
@@ -517,6 +589,7 @@ export async function getMe(req: AuthRequest, res: Response) {
       email: user.email,
       phone: user.phone,
       phoneVerified: user.phoneVerified,
+      emailVerified: user.emailVerified,
       roleDefault: user.roleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
       driverProfile: user.driverProfile,
@@ -567,6 +640,10 @@ export async function refreshTokens(req: AuthRequest, res: Response) {
     })
 
     if (!user) {
+      return res.status(401).json({ error: "Invalid refresh token" })
+    }
+
+    if (user.deletedAt) {
       return res.status(401).json({ error: "Invalid refresh token" })
     }
 
@@ -767,7 +844,7 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       )
       return res.status(400).json({ error: "Invalid email or OTP" })
     }
-    await prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
         emailVerified: true,
@@ -775,7 +852,7 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       },
     })
 
-    const response = await buildAuthResponse(user)
+    const response = await buildAuthResponse(updated)
 
     console.log(response)
     return res.status(200).json(response)

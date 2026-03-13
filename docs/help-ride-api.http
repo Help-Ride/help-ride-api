@@ -4,6 +4,10 @@
 @baseUrl = http://localhost:4000/api
 # @baseUrl = https://dev-help-ride-api.vercel.app/api
 
+# App Review note:
+# Sign in with Apple is available on the login screen.
+# Account deletion is available at Profile > Delete Account.
+
 # Fill these from responses as you test
 @accessToken = REPLACE_WITH_ACCESS_TOKEN
 @driverAccessToken = REPLACE_WITH_DRIVER_ACCESS_TOKEN
@@ -229,6 +233,19 @@ Content-Type: application/json
 
 ###
 
+### OAUTH LOGIN (APPLE)
+POST {{baseUrl}}/auth/oauth
+Content-Type: application/json
+
+{
+  "provider": "apple",
+  "providerUserId": "apple-user-1234567890",
+  "email": "private-relay@example.com",
+  "name": "Apple User"
+}
+
+###
+
 ################################################
 ### 👤 AUTH – CURRENT USER
 ################################################
@@ -267,6 +284,13 @@ Content-Type: application/json
   "name": "Updated Name",
   "phone": "{{phone}}"
 }
+
+###
+
+### DELETE MY ACCOUNT
+# Deletes the current account after active rides/bookings/requests/payouts are resolved.
+DELETE {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
 
 ###
 

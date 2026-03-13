@@ -113,6 +113,7 @@ model User {
   emailVerified             Boolean          @default(false)
   phoneVerified             Boolean          @default(false)
   stripeAccountId           String?          @unique
+  deletedAt                 DateTime?
 
   emailVerifyOtp            String?
   emailVerifyOtpExpiresAt   DateTime?

@@ -4,6 +4,7 @@ import { authGuard } from "../middleware/auth.js"
 import {
   changeUserPassword,
   createUserAvatarPresign,
+  deleteMyAccount,
   getUserAvatar,
   getUserById,
   updateMyLocation,
@@ -13,6 +14,7 @@ import {
 const router = Router()
 
 router.get("/:id/avatar", getUserAvatar)
+router.delete("/me", authGuard, deleteMyAccount)
 
 // Public: fetch user profile (safe fields only)
 router.get("/:id", getUserById)
