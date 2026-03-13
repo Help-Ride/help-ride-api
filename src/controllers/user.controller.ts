@@ -4,6 +4,12 @@ import bcrypt from "bcryptjs"
 import { randomUUID } from "crypto"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { notifyUser, notifyUsersByIds } from "../lib/notifications.js"
+import { dispatchRideRequestCancel } from "../lib/realtime.js"
+import {
+  initiateBookingRefundIfPaid,
+  initiateRideRequestRefund,
+} from "../lib/refunds.js"
 import { deleteObject, getDownloadUrl, getUploadUrl } from "../lib/s3.js"
 import { isValidE164Phone, normalizePhoneNumber } from "../lib/twilio.js"
 
@@ -30,24 +36,34 @@ interface PresignUserAvatarBody {
   mimeType?: string
 }
 
-const TERMINAL_BOOKING_STATUSES = [
-  "cancelled_by_passenger",
-  "cancelled_by_driver",
-  "completed",
+const ACTIVE_BOOKING_STATUSES = [
+  "pending",
+  "confirmed",
+  "ACCEPTED",
+  "PAYMENT_PENDING",
+  "CONFIRMED",
 ] as const
-const TERMINAL_RIDE_STATUSES = ["completed", "cancelled"] as const
+const SEAT_RESTORE_BOOKING_STATUSES = [
+  "confirmed",
+  "ACCEPTED",
+  "PAYMENT_PENDING",
+  "CONFIRMED",
+] as const
+const ACTIVE_RIDE_STATUSES = ["open", "ongoing"] as const
 const TERMINAL_RIDE_REQUEST_STATUSES = [
   "CANCELLED",
   "EXPIRED",
   "cancelled",
   "expired",
 ] as const
-const TERMINAL_RIDE_REQUEST_OFFER_STATUSES = [
-  "REJECTED",
-  "EXPIRED",
-  "rejected",
-  "cancelled",
+const ACTIVE_RIDE_REQUEST_OFFER_STATUSES = [
+  "SENT",
+  "pending",
+  "ACCEPTED",
 ] as const
+const SEAT_RESTORE_BOOKING_STATUS_SET = new Set<string>(
+  SEAT_RESTORE_BOOKING_STATUSES
+)
 
 function buildDeletedEmail(userId: string) {
   return `deleted-${userId}-${Date.now()}@help-ride.invalid`
@@ -71,25 +87,12 @@ function extractAvatarS3Key(userId: string, rawUrl: string | null | undefined) {
   }
 }
 
-function getDeletionReasonsMessage(reasons: string[]) {
-  const labels = reasons.map((reason) => {
-    switch (reason) {
-      case "active_booking":
-        return "active bookings"
-      case "active_ride":
-        return "active rides"
-      case "active_ride_request":
-        return "active ride requests"
-      case "active_ride_request_offer":
-        return "active ride request offers"
-      case "pending_driver_transfer":
-        return "pending driver payouts"
-      default:
-        return reason.replaceAll("_", " ")
-    }
-  })
-
-  return `Resolve ${labels.join(", ")} before deleting your account.`
+function uniqueIds(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(
+      values.filter((value): value is string => typeof value === "string" && value.length > 0)
+    )
+  )
 }
 
 function parseNumber(value: unknown) {
@@ -391,48 +394,122 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
     }
 
     const [
-      activeBookingsCount,
-      activeRidesCount,
-      activeRideRequestsCount,
-      activeRideRequestOffersCount,
+      passengerBookings,
+      driverRides,
+      passengerRideRequests,
+      driverAssignedRideRequests,
+      driverRideRequestOffers,
       pendingDriverTransfersCount,
       driverDocuments,
     ] = await prisma.$transaction([
-      prisma.booking.count({
+      prisma.booking.findMany({
         where: {
           passengerId: userId,
-          status: { notIn: [...TERMINAL_BOOKING_STATUSES] },
+          status: { in: [...ACTIVE_BOOKING_STATUSES] },
+        },
+        select: {
+          id: true,
+          rideId: true,
+          seatsBooked: true,
+          status: true,
+          paymentStatus: true,
+          stripePaymentIntentId: true,
+          ride: {
+            select: {
+              id: true,
+              driverId: true,
+              fromCity: true,
+              toCity: true,
+              seatsAvailable: true,
+              seatsTotal: true,
+            },
+          },
         },
       }),
-      prisma.ride.count({
+      prisma.ride.findMany({
         where: {
           driverId: userId,
-          status: { notIn: [...TERMINAL_RIDE_STATUSES] },
+          status: { in: [...ACTIVE_RIDE_STATUSES] },
+        },
+        select: {
+          id: true,
+          fromCity: true,
+          toCity: true,
+          bookings: {
+            where: {
+              status: { in: [...ACTIVE_BOOKING_STATUSES] },
+            },
+            select: {
+              id: true,
+              passengerId: true,
+              status: true,
+              paymentStatus: true,
+              stripePaymentIntentId: true,
+            },
+          },
         },
       }),
-      prisma.rideRequest.count({
+      prisma.rideRequest.findMany({
         where: {
-          OR: [
-            {
-              passengerId: userId,
-              status: { notIn: [...TERMINAL_RIDE_REQUEST_STATUSES] },
+          passengerId: userId,
+          status: { notIn: [...TERMINAL_RIDE_REQUEST_STATUSES] },
+        },
+        select: {
+          id: true,
+          mode: true,
+          status: true,
+          jitPaymentIntentId: true,
+          fromCity: true,
+          toCity: true,
+          driverId: true,
+          offers: {
+            where: {
+              status: { in: [...ACTIVE_RIDE_REQUEST_OFFER_STATUSES] },
             },
-            {
-              driverId: userId,
-              status: { notIn: [...TERMINAL_RIDE_REQUEST_STATUSES] },
+            select: {
+              driverId: true,
             },
-          ],
+          },
         },
       }),
-      prisma.rideRequestOffer.count({
+      prisma.rideRequest.findMany({
         where: {
           driverId: userId,
-          status: { notIn: [...TERMINAL_RIDE_REQUEST_OFFER_STATUSES] },
+          status: { notIn: [...TERMINAL_RIDE_REQUEST_STATUSES] },
+        },
+        select: {
+          id: true,
+          passengerId: true,
+          fromCity: true,
+          toCity: true,
+        },
+      }),
+      prisma.rideRequestOffer.findMany({
+        where: {
+          driverId: userId,
+          status: { in: [...ACTIVE_RIDE_REQUEST_OFFER_STATUSES] },
+        },
+        select: {
+          id: true,
+          rideRequestId: true,
+          ride: {
+            select: {
+              fromCity: true,
+              toCity: true,
+            },
+          },
+          rideRequest: {
+            select: {
+              passengerId: true,
+              fromCity: true,
+              toCity: true,
+            },
+          },
         },
       }),
       prisma.payment.count({
         where: {
-          status: "succeeded",
+          status: { in: ["paid", "succeeded"] },
           driverTransferredAt: null,
           booking: {
             ride: {
@@ -447,21 +524,73 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
       }),
     ])
 
-    const reasons: string[] = []
-    if (activeBookingsCount > 0) reasons.push("active_booking")
-    if (activeRidesCount > 0) reasons.push("active_ride")
-    if (activeRideRequestsCount > 0) reasons.push("active_ride_request")
-    if (activeRideRequestOffersCount > 0) {
-      reasons.push("active_ride_request_offer")
-    }
-    if (pendingDriverTransfersCount > 0) {
-      reasons.push("pending_driver_transfer")
+    try {
+      await Promise.all(
+        passengerBookings.map((booking) =>
+          initiateBookingRefundIfPaid({
+            bookingId: booking.id,
+            paymentStatus: booking.paymentStatus,
+            stripePaymentIntentId: booking.stripePaymentIntentId,
+            source: "passenger_cancel_booking",
+          })
+        )
+      )
+    } catch (refundErr) {
+      console.error("Refund initiation failed for account deletion bookings", {
+        userId,
+        err: refundErr,
+      })
+      return res.status(502).json({
+        error: "Unable to initiate booking refunds for account deletion. Please retry.",
+      })
     }
 
-    if (reasons.length > 0) {
-      return res.status(409).json({
-        error: getDeletionReasonsMessage(reasons),
-        reasons,
+    try {
+      await Promise.all(
+        driverRides.flatMap((ride) =>
+          ride.bookings.map((booking) =>
+            initiateBookingRefundIfPaid({
+              bookingId: booking.id,
+              paymentStatus: booking.paymentStatus,
+              stripePaymentIntentId: booking.stripePaymentIntentId,
+              source: "driver_cancel_ride",
+            })
+          )
+        )
+      )
+    } catch (refundErr) {
+      console.error("Refund initiation failed for account deletion rides", {
+        userId,
+        err: refundErr,
+      })
+      return res.status(502).json({
+        error: "Unable to initiate ride refunds for account deletion. Please retry.",
+      })
+    }
+
+    try {
+      await Promise.all(
+        passengerRideRequests
+          .filter((request) => request.mode === "JIT")
+          .map((request) =>
+            initiateRideRequestRefund({
+              rideRequestId: request.id,
+              stripePaymentIntentId: request.jitPaymentIntentId,
+              source: "passenger_cancel_ride_request",
+            })
+          )
+      )
+    } catch (refundErr) {
+      console.error(
+        "Refund initiation failed for account deletion ride requests",
+        {
+          userId,
+          err: refundErr,
+        }
+      )
+      return res.status(502).json({
+        error:
+          "Unable to initiate ride request refunds for account deletion. Please retry.",
       })
     }
 
@@ -477,7 +606,117 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
       }
     }
 
+    const passengerBookingIds = passengerBookings.map((booking) => booking.id)
+    const driverRideIds = driverRides.map((ride) => ride.id)
+    const driverRideBookings = driverRides.flatMap((ride) => ride.bookings)
+    const driverRideBookingIds = driverRideBookings.map((booking) => booking.id)
+    const passengerRideRequestIds = passengerRideRequests.map((request) => request.id)
+    const driverAssignedRideRequestIds = driverAssignedRideRequests.map(
+      (request) => request.id
+    )
+    const rideRequestIdsToCancel = uniqueIds([
+      ...passengerRideRequestIds,
+      ...driverAssignedRideRequestIds,
+    ])
+    const preserveStripeConnectAccount = pendingDriverTransfersCount > 0
+    const seatRestoresByRideId = new Map<
+      string,
+      {
+        rideId: string
+        seatsAvailable: number
+        seatsTotal: number
+        seatsToRestore: number
+      }
+    >()
+
+    for (const booking of passengerBookings) {
+      if (!SEAT_RESTORE_BOOKING_STATUS_SET.has(booking.status)) {
+        continue
+      }
+
+      const existingRestore = seatRestoresByRideId.get(booking.rideId)
+      if (existingRestore) {
+        existingRestore.seatsToRestore += booking.seatsBooked
+        continue
+      }
+
+      seatRestoresByRideId.set(booking.rideId, {
+        rideId: booking.rideId,
+        seatsAvailable: booking.ride.seatsAvailable,
+        seatsTotal: booking.ride.seatsTotal,
+        seatsToRestore: booking.seatsBooked,
+      })
+    }
+
     await prisma.$transaction(async (tx) => {
+      if (passengerBookingIds.length > 0) {
+        await tx.booking.updateMany({
+          where: {
+            id: { in: passengerBookingIds },
+            status: { in: [...ACTIVE_BOOKING_STATUSES] },
+          },
+          data: { status: "cancelled_by_passenger" },
+        })
+      }
+
+      for (const restore of seatRestoresByRideId.values()) {
+        await tx.ride.update({
+          where: { id: restore.rideId },
+          data: {
+            seatsAvailable: Math.min(
+              restore.seatsTotal,
+              restore.seatsAvailable + restore.seatsToRestore
+            ),
+          },
+        })
+      }
+
+      if (driverRideIds.length > 0) {
+        await tx.ride.updateMany({
+          where: {
+            id: { in: driverRideIds },
+            status: { in: [...ACTIVE_RIDE_STATUSES] },
+          },
+          data: { status: "cancelled" },
+        })
+      }
+
+      if (driverRideBookingIds.length > 0) {
+        await tx.booking.updateMany({
+          where: {
+            id: { in: driverRideBookingIds },
+            status: { in: [...ACTIVE_BOOKING_STATUSES] },
+          },
+          data: { status: "cancelled_by_driver" },
+        })
+      }
+
+      if (rideRequestIdsToCancel.length > 0) {
+        await tx.rideRequest.updateMany({
+          where: {
+            id: { in: rideRequestIdsToCancel },
+            status: { notIn: [...TERMINAL_RIDE_REQUEST_STATUSES] },
+          },
+          data: { status: "CANCELLED" },
+        })
+
+        await tx.rideRequestOffer.updateMany({
+          where: {
+            rideRequestId: { in: rideRequestIdsToCancel },
+            status: { in: [...ACTIVE_RIDE_REQUEST_OFFER_STATUSES] },
+          },
+          data: { status: "EXPIRED" },
+        })
+      }
+
+      await tx.rideRequestOffer.updateMany({
+        where: {
+          driverId: userId,
+          status: { in: [...ACTIVE_RIDE_REQUEST_OFFER_STATUSES] },
+        },
+        data: { status: "EXPIRED" },
+      })
+
       await tx.refreshToken.deleteMany({
         where: { userId },
       })
@@ -510,7 +749,9 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
           providerAvatarUrl: null,
           emailVerified: false,
           phoneVerified: false,
-          stripeAccountId: null,
+          stripeAccountId: preserveStripeConnectAccount
+            ? user.stripeAccountId
+            : null,
           emailVerifyOtp: null,
           emailVerifyOtpExpiresAt: null,
           emailVerifyOtpAttempts: 0,
@@ -523,6 +764,112 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
         },
       })
     })
+
+    await Promise.all(
+      passengerBookings.map((booking) =>
+        notifyUser({
+          userId: booking.ride.driverId,
+          title: "Booking cancelled",
+          body: `${booking.ride.fromCity} → ${booking.ride.toCity} was cancelled because the passenger deleted their account`,
+          type: "ride_update",
+          data: {
+            bookingId: booking.id,
+            rideId: booking.rideId,
+            kind: "booking_cancelled_by_passenger",
+          },
+        })
+      )
+    )
+
+    await Promise.all(
+      driverRides.flatMap((ride) =>
+        ride.bookings.map((booking) =>
+          notifyUser({
+            userId: booking.passengerId,
+            title: "Ride cancelled",
+            body: `${ride.fromCity} → ${ride.toCity} was cancelled because the driver deleted their account`,
+            type: "ride_update",
+            data: {
+              rideId: ride.id,
+              bookingId: booking.id,
+              kind: "ride_cancelled_by_driver",
+            },
+          })
+        )
+      )
+    )
+
+    await Promise.all(
+      passengerRideRequests.map(async (request) => {
+        const recipientIds = uniqueIds([
+          request.driverId,
+          ...request.offers.map((offer) => offer.driverId),
+        ]).filter((id) => id !== userId)
+
+        if (recipientIds.length === 0) {
+          return
+        }
+
+        await notifyUsersByIds({
+          userIds: recipientIds,
+          title: "Ride request cancelled",
+          body: `${request.fromCity} → ${request.toCity} was cancelled because the passenger deleted their account`,
+          type: "ride_update",
+          data: {
+            rideRequestId: request.id,
+            kind: "ride_request_cancelled_by_passenger",
+          },
+        })
+      })
+    )
+
+    await Promise.all(
+      driverAssignedRideRequests.map((request) =>
+        notifyUser({
+          userId: request.passengerId,
+          title: "Ride request cancelled",
+          body: `${request.fromCity} → ${request.toCity} was cancelled because the assigned driver deleted their account`,
+          type: "ride_update",
+          data: {
+            rideRequestId: request.id,
+            kind: "ride_request_cancelled_by_driver",
+          },
+        })
+      )
+    )
+
+    const driverAssignedRideRequestIdSet = new Set(driverAssignedRideRequestIds)
+    await Promise.all(
+      driverRideRequestOffers
+        .filter((offer) => !driverAssignedRideRequestIdSet.has(offer.rideRequestId))
+        .map((offer) =>
+          notifyUser({
+            userId: offer.rideRequest.passengerId,
+            title: "Offer cancelled",
+            body: `${offer.ride?.fromCity ?? offer.rideRequest.fromCity} → ${offer.ride?.toCity ?? offer.rideRequest.toCity} offer was cancelled because the driver deleted their account`,
+            type: "ride_update",
+            data: {
+              offerId: offer.id,
+              rideRequestId: offer.rideRequestId,
+              kind: "ride_request_offer_cancelled",
+            },
+          })
+        )
+    )
+
+    await Promise.all(
+      passengerRideRequestIds.map(async (rideRequestId) => {
+        try {
+          await dispatchRideRequestCancel({ rideRequestId })
+        } catch (cancelErr) {
+          console.error(
+            "[realtime] cancel dispatch failed",
+            JSON.stringify({ rideRequestId, source: "delete_account" }),
+            cancelErr
+          )
+        }
+      })
+    )
 
     await Promise.allSettled(
       [...keysToDelete].map(async (key) => {

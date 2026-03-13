@@ -2516,6 +2516,7 @@ export async function payoutPaymentToDriverAdmin(req: Request, res: Response) {
       where: { id: payment.booking.ride.driverId },
       select: {
         id: true,
+        deletedAt: true,
         stripeAccountId: true,
         driverProfile: {
           select: { id: true },
@@ -2523,7 +2524,7 @@ export async function payoutPaymentToDriverAdmin(req: Request, res: Response) {
       },
     })
 
-    if (!driver || !driver.driverProfile) {
+    if (!driver || (!driver.driverProfile && !driver.deletedAt)) {
       return res.status(409).json({
         error: "Assigned driver profile is missing",
       })

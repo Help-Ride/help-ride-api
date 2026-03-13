@@ -7,6 +7,7 @@
 # App Review note:
 # Sign in with Apple is available on the login screen.
 # Account deletion is available at Profile > Delete Account.
+# Deleting an account automatically cancels active rides, bookings, ride requests, and open offers.
 
 # Fill these from responses as you test
 @accessToken = REPLACE_WITH_ACCESS_TOKEN
@@ -288,7 +289,8 @@ Content-Type: application/json
 ###
 
 ### DELETE MY ACCOUNT
-# Deletes the current account after active rides/bookings/requests/payouts are resolved.
+# Deletes the current account and automatically cancels active rides/bookings/requests/offers.
+# Any refunds or driver payouts already in progress continue processing after deletion.
 DELETE {{baseUrl}}/users/me
 Authorization: Bearer {{accessToken}}
 
