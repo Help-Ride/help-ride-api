@@ -6,13 +6,49 @@ import { AuthRequest } from "../middleware/auth.js"
 import { getUploadUrl, getDownloadUrl } from "../lib/s3.js"
 
 interface PresignBody {
-  type?: "license" | "insurance" | "ownership" | "other"
+  type?: string
   fileName?: string
   mimeType?: string
 }
 
+const DRIVER_DOCUMENT_TYPES = ["license", "insurance", "ownership", "other"] as const
+type DriverDocumentType = (typeof DRIVER_DOCUMENT_TYPES)[number]
+
+const DRIVER_DOCUMENT_TYPE_ALIASES: Record<string, DriverDocumentType> = {
+  registration: "ownership",
+}
+
+function resolveCurrentDriverUserId(req: AuthRequest, res: Response): string | null {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthorized" })
+    return null
+  }
+
+  const { id: userIdParam } = req.params
+  if (userIdParam && userIdParam !== req.userId) {
+    res.status(403).json({
+      error: "You can only access documents for your own account",
+    })
+    return null
+  }
+
+  return req.userId
+}
+
+function normalizeDriverDocumentType(input?: string): DriverDocumentType | null {
+  if (!input) return null
+
+  const type = input.trim().toLowerCase()
+  if (DRIVER_DOCUMENT_TYPES.includes(type as DriverDocumentType)) {
+    return type as DriverDocumentType
+  }
+
+  return DRIVER_DOCUMENT_TYPE_ALIASES[type] ?? null
+}
+
 /**
- * POST /api/drivers/:id/documents/presign
+ * POST /api/drivers/me/documents/presign
+ * Legacy alias: POST /api/drivers/:id/documents/presign
  * Returns a presigned S3 URL + creates a pending DriverDocument row
  */
 export async function createDriverDocumentPresign(
@@ -20,38 +56,34 @@ export async function createDriverDocumentPresign(
   res: Response
 ) {
   try {
-    if (!req.userId) {
-      return res.status(401).json({ error: "Unauthorized" })
+    const userId = resolveCurrentDriverUserId(req, res)
+    if (!userId) {
+      return
     }
 
-    const { id: userIdParam } = req.params
-    if (!userIdParam) {
-      return res.status(400).json({ error: "user id is required in path" })
-    }
+    const { type: rawType, fileName, mimeType } = (req.body ?? {}) as PresignBody
+    const type = normalizeDriverDocumentType(rawType)
 
-    // Only owner can upload their docs (you can extend later for admin)
-    if (userIdParam !== req.userId) {
-      return res.status(403).json({
-        error: "You can only upload documents for your own account",
-      })
-    }
-
-    const { type, fileName, mimeType } = (req.body ?? {}) as PresignBody
-
-    if (!type || !fileName || !mimeType) {
+    if (!rawType || !fileName || !mimeType) {
       return res.status(400).json({
         error: "type, fileName, and mimeType are required",
+      })
+    }
+    if (!type) {
+      return res.status(400).json({
+        error:
+          "Invalid type. Allowed: license, insurance, ownership, other (registration is accepted as ownership).",
       })
     }
 
     const docId = randomUUID()
     const safeFileName = fileName.replace(/[^\w.\-]/g, "_")
-    const key = `drivers/${req.userId}/${type}/${docId}-${safeFileName}`
+    const key = `drivers/${userId}/${type}/${docId}-${safeFileName}`
 
     const doc = await prisma.driverDocument.create({
       data: {
         id: docId,
-        userId: req.userId,
+        userId,
         type,
         s3Key: key,
         fileName: safeFileName,
@@ -82,28 +114,19 @@ export async function createDriverDocumentPresign(
 }
 
 /**
- * GET /api/drivers/:id/documents
+ * GET /api/drivers/me/documents
+ * Legacy alias: GET /api/drivers/:id/documents
  * List driver documents for current user
  */
 export async function listDriverDocuments(req: AuthRequest, res: Response) {
   try {
-    if (!req.userId) {
-      return res.status(401).json({ error: "Unauthorized" })
-    }
-
-    const { id: userIdParam } = req.params
-    if (!userIdParam) {
-      return res.status(400).json({ error: "user id is required in path" })
-    }
-
-    if (userIdParam !== req.userId) {
-      return res.status(403).json({
-        error: "You can only view your own documents",
-      })
+    const userId = resolveCurrentDriverUserId(req, res)
+    if (!userId) {
+      return
     }
 
     const docs = await prisma.driverDocument.findMany({
-      where: { userId: userIdParam },
+      where: { userId },
       orderBy: { createdAt: "desc" },
     })
 

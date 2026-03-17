@@ -3,10 +3,11 @@ import { createHash } from "node:crypto"
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { notifyUsersByRole } from "../lib/notifications.js"
 import { resolveSeatPrice } from "../lib/pricing.js"
 import { initiateRideRequestRefund } from "../lib/refunds.js"
 import { getPlatformFeePct, stripe } from "../lib/stripe.js"
+import { notifyNearbyDriversForRideRequest } from "../lib/nearbyDriverNotifications.js"
+import { notifyUser, notifyUsersByIds } from "../lib/notifications.js"
 import {
   dispatchRideRequest,
   dispatchRideRequestCancel,
@@ -73,6 +74,7 @@ const TERMINAL_REQUEST_STATUSES = new Set([
   "cancelled",
   "expired",
 ])
+const OPEN_OFFER_STATUSES = ["SENT", "pending"] as const
 
 function validateAndParsePreferredDate(preferredDate: string | undefined): {
   date: Date | undefined
@@ -305,17 +307,25 @@ export async function createRide(req: AuthRequest, res: Response) {
       )
     }
 
-    await notifyUsersByRole({
-      role: "driver",
-      excludeUserId: req.userId,
-      title: "New ride request",
-      body: `${request.fromCity} → ${request.toCity} request posted`,
-      type: "ride_update",
-      data: {
-        rideRequestId: request.id,
-        kind: "ride_request_created",
-      },
+    const nearbyNotification = await notifyNearbyDriversForRideRequest({
+      rideRequestId: request.id,
+      passengerId: req.userId,
+      pickupCity: request.fromCity,
+      pickupLat: request.fromLat,
+      pickupLng: request.fromLng,
+      dropoffCity: request.toCity,
     })
+
+    console.info(
+      "[dispatch] nearby driver notification completed",
+      JSON.stringify({
+        rideRequestId: request.id,
+        matchedDrivers: nearbyNotification.matchedDrivers,
+        notifiedDrivers: nearbyNotification.notifiedDrivers,
+        radiusKm: nearbyNotification.radiusKm,
+        maxLocationAgeMinutes: nearbyNotification.locationMaxAgeMinutes,
+      })
+    )
 
     return res.status(201).json(offeringRequest)
   } catch (err) {
@@ -651,6 +661,30 @@ export async function updateRide(req: AuthRequest, res: Response) {
         },
       },
     })
+
+    const pendingOffers = await prisma.rideRequestOffer.findMany({
+      where: {
+        rideRequestId: request.id,
+        status: { in: [...OPEN_OFFER_STATUSES] },
+      },
+      select: { driverId: true },
+    })
+    const pendingOfferDriverIds = Array.from(
+      new Set(pendingOffers.map((offer) => offer.driverId))
+    )
+
+    if (pendingOfferDriverIds.length > 0) {
+      await notifyUsersByIds({
+        userIds: pendingOfferDriverIds,
+        title: "Ride request updated",
+        body: `${updated.fromCity} → ${updated.toCity} request details changed`,
+        type: "ride_update",
+        data: {
+          rideRequestId: updated.id,
+          kind: "ride_request_updated",
+        },
+      })
+    }
 
     return res.json(updated)
   } catch (err) {
@@ -1181,10 +1215,43 @@ export async function cancelRideRequest(req: AuthRequest, res: Response) {
       }
     }
 
-    const updated = await prisma.rideRequest.update({
-      where: { id },
-      data: { status: "CANCELLED" },
+    const pendingOffers = await prisma.rideRequestOffer.findMany({
+      where: {
+        rideRequestId: existing.id,
+        status: { in: [...OPEN_OFFER_STATUSES] },
+      },
+      select: { driverId: true },
     })
+
+    const [updated] = await prisma.$transaction([
+      prisma.rideRequest.update({
+        where: { id },
+        data: { status: "CANCELLED" },
+      }),
+      prisma.rideRequestOffer.updateMany({
+        where: {
+          rideRequestId: existing.id,
+          status: { in: [...OPEN_OFFER_STATUSES] },
+        },
+        data: { status: "EXPIRED" },
+      }),
+    ])
+
+    const pendingOfferDriverIds = Array.from(
+      new Set(pendingOffers.map((offer) => offer.driverId))
+    )
+    if (pendingOfferDriverIds.length > 0) {
+      await notifyUsersByIds({
+        userIds: pendingOfferDriverIds,
+        title: "Ride request cancelled",
+        body: `${existing.fromCity} → ${existing.toCity} request was cancelled by passenger`,
+        type: "ride_update",
+        data: {
+          rideRequestId: existing.id,
+          kind: "ride_request_cancelled_by_passenger",
+        },
+      })
+    }
 
     try {
       await dispatchRideRequestCancel({ rideRequestId: existing.id })
@@ -1325,6 +1392,18 @@ export async function acceptRideRequest(req: AuthRequest, res: Response) {
     const resolvedPricePerSeat =
       pricePerSeat != null ? Number(pricePerSeat) : fallbackPricePerSeat
 
+    const competingOffers = await prisma.rideRequestOffer.findMany({
+      where: {
+        rideRequestId: rideRequest.id,
+        driverId: { not: driverId },
+        status: { in: [...OPEN_OFFER_STATUSES] },
+      },
+      select: { driverId: true },
+    })
+    const competingDriverIds = Array.from(
+      new Set(competingOffers.map((offer) => offer.driverId))
+    )
+
     if (rideRequest.mode === "JIT") {
       if (!Number.isFinite(resolvedPricePerSeat) || resolvedPricePerSeat <= 0) {
         return res
@@ -1450,6 +1529,46 @@ export async function acceptRideRequest(req: AuthRequest, res: Response) {
           return [updatedRequest, ride, createdBooking, offer] as const
         })
 
+      await Promise.all([
+        notifyUser({
+          userId: rideRequest.passengerId,
+          title: "Driver matched",
+          body: `${rideRequest.fromCity} → ${rideRequest.toCity} has been matched`,
+          type: "ride_update",
+          data: {
+            rideRequestId: updatedRideRequest.id,
+            rideId: createdRide.id,
+            bookingId: booking.id,
+            kind: "ride_request_accepted",
+          },
+        }),
+        notifyUser({
+          userId: driverId,
+          title: "Ride request accepted",
+          body: `You were matched for ${rideRequest.fromCity} → ${rideRequest.toCity}`,
+          type: "ride_update",
+          data: {
+            rideRequestId: updatedRideRequest.id,
+            rideId: createdRide.id,
+            bookingId: booking.id,
+            kind: "ride_request_assigned_driver",
+          },
+        }),
+      ])
+
+      if (competingDriverIds.length > 0) {
+        await notifyUsersByIds({
+          userIds: competingDriverIds,
+          title: "Ride request no longer available",
+          body: `${rideRequest.fromCity} → ${rideRequest.toCity} was accepted by another driver`,
+          type: "ride_update",
+          data: {
+            rideRequestId: rideRequest.id,
+            kind: "ride_request_offer_not_selected",
+          },
+        })
+      }
+
       return res.status(200).json({
         ok: true,
         idempotent: false,
@@ -1505,6 +1624,46 @@ export async function acceptRideRequest(req: AuthRequest, res: Response) {
         data: { status: "REJECTED" },
       }),
     ])
+
+    await Promise.all([
+      notifyUser({
+        userId: rideRequest.passengerId,
+        title: "Driver matched",
+        body: `${rideRequest.fromCity} → ${rideRequest.toCity} has been matched`,
+        type: "ride_update",
+        data: {
+          rideRequestId: updatedRideRequest.id,
+          offerId: acceptedOffer.id,
+          rideId: acceptedOffer.rideId ?? "",
+          kind: "ride_request_accepted",
+        },
+      }),
+      notifyUser({
+        userId: driverId,
+        title: "Ride request accepted",
+        body: `You were matched for ${rideRequest.fromCity} → ${rideRequest.toCity}`,
+        type: "ride_update",
+        data: {
+          rideRequestId: updatedRideRequest.id,
+          offerId: acceptedOffer.id,
+          rideId: acceptedOffer.rideId ?? "",
+          kind: "ride_request_assigned_driver",
+        },
+      }),
+    ])
+
+    if (competingDriverIds.length > 0) {
+      await notifyUsersByIds({
+        userIds: competingDriverIds,
+        title: "Ride request no longer available",
+        body: `${rideRequest.fromCity} → ${rideRequest.toCity} was accepted by another driver`,
+        type: "ride_update",
+        data: {
+          rideRequestId: rideRequest.id,
+          kind: "ride_request_offer_not_selected",
+        },
+      })
+    }
 
     return res.status(200).json({
       ok: true,

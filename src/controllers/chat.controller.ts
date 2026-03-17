@@ -8,6 +8,41 @@ import { notifyUser } from "../lib/notifications.js"
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
 const PREVIEW_MAX_LEN = 160
+const MONTH_LABELS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const
+
+const conversationInclude = {
+  passenger: {
+    select: { id: true, name: true, email: true, providerAvatarUrl: true },
+  },
+  driver: {
+    select: { id: true, name: true, email: true, providerAvatarUrl: true },
+  },
+  ride: {
+    select: {
+      id: true,
+      fromCity: true,
+      toCity: true,
+      startTime: true,
+      status: true,
+      pricePerSeat: true,
+      seatsTotal: true,
+      seatsAvailable: true,
+    },
+  },
+} as const
 
 interface CreateConversationBody {
   rideId?: string
@@ -29,6 +64,51 @@ function buildPreview(body: string) {
     return trimmed
   }
   return `${trimmed.slice(0, PREVIEW_MAX_LEN - 3)}...`
+}
+
+function formatRideTimeLabel(value: Date | null | undefined) {
+  if (!value) return null
+  const month = MONTH_LABELS[value.getMonth()] ?? ""
+  const day = value.getDate()
+  const hour24 = value.getHours()
+  const minute = value.getMinutes().toString().padStart(2, "0")
+  const suffix = hour24 >= 12 ? "PM" : "AM"
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12
+  return `${month} ${day}, ${hour12}:${minute} ${suffix}`
+}
+
+function buildRideReference(rideId: string | null | undefined) {
+  const id = rideId?.trim() ?? ""
+  if (id.length === 0) return null
+  return `Ride #${id.slice(0, 8).toUpperCase()}`
+}
+
+function serializeConversation(conversation: any) {
+  const ride = conversation.ride ?? null
+  const ridePricePerSeat =
+    ride?.pricePerSeat == null ? null : Number(ride.pricePerSeat)
+  const tripSummary =
+    ride?.fromCity && ride?.toCity ? `${ride.fromCity} → ${ride.toCity}` : null
+  const tripTimeLabel = formatRideTimeLabel(ride?.startTime)
+  const rideReference = buildRideReference(ride?.id ?? conversation.rideId)
+
+  return {
+    ...conversation,
+    ride:
+      ride == null
+        ? null
+        : {
+            ...ride,
+            pricePerSeat: ridePricePerSeat,
+          },
+    tripSummary,
+    tripTime: tripTimeLabel,
+    tripTimeLabel,
+    rideReference,
+    rideStatus: ride?.status ?? null,
+    ridePricePerSeat,
+    rideStartTime: ride?.startTime ?? null,
+  }
 }
 
 async function ensureParticipant(conversationId: string, userId: string) {
@@ -105,18 +185,11 @@ export async function createConversation(req: AuthRequest, res: Response) {
         passengerId,
         driverId,
       },
-      include: {
-        passenger: {
-          select: { id: true, name: true, email: true, providerAvatarUrl: true },
-        },
-        driver: {
-          select: { id: true, name: true, email: true, providerAvatarUrl: true },
-        },
-      },
+      include: conversationInclude,
     })
 
     if (existing) {
-      return res.status(200).json(existing)
+      return res.status(200).json(serializeConversation(existing))
     }
 
     const conversation = await prisma.conversation.create({
@@ -125,17 +198,10 @@ export async function createConversation(req: AuthRequest, res: Response) {
         passengerId,
         driverId,
       },
-      include: {
-        passenger: {
-          select: { id: true, name: true, email: true, providerAvatarUrl: true },
-        },
-        driver: {
-          select: { id: true, name: true, email: true, providerAvatarUrl: true },
-        },
-      },
+      include: conversationInclude,
     })
 
-    return res.status(201).json(conversation)
+    return res.status(201).json(serializeConversation(conversation))
   } catch (err) {
     console.error("POST /chat/conversations error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -156,17 +222,10 @@ export async function listConversations(req: AuthRequest, res: Response) {
         OR: [{ passengerId: req.userId }, { driverId: req.userId }],
       },
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
-      include: {
-        passenger: {
-          select: { id: true, name: true, email: true, providerAvatarUrl: true },
-        },
-        driver: {
-          select: { id: true, name: true, email: true, providerAvatarUrl: true },
-        },
-      },
+      include: conversationInclude,
     })
 
-    return res.json(conversations)
+    return res.json(conversations.map(serializeConversation))
   } catch (err) {
     console.error("GET /chat/conversations error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -285,11 +344,13 @@ export async function sendMessage(req: AuthRequest, res: Response) {
       participantCheck.conversation.passengerId === req.userId
         ? participantCheck.conversation.driverId
         : participantCheck.conversation.passengerId
+    const senderName = message.sender.name?.trim() || "Someone"
+    const notificationBody = `${senderName}: ${preview}`
 
-    await notifyUser({
+    const notification = await notifyUser({
       userId: recipientId,
       title: "New message",
-      body: `You have a new message from ${message.sender.name}`,
+      body: notificationBody,
       type: "system",
       data: {
         conversationId,
@@ -298,45 +359,82 @@ export async function sendMessage(req: AuthRequest, res: Response) {
       },
     })
 
+    if (!notification) {
+      console.warn("chat notification dispatch failed", {
+        conversationId,
+        messageId: message.id,
+        recipientId,
+      })
+    }
+
     console.log("chat message saved", {
       conversationId,
       messageId: message.id,
     })
 
+    const refreshedConversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: conversationInclude,
+    })
+
     if (pusherConfigured && pusher) {
       const pusherClient = pusher
       const conversationChannel = `private-conversation-${conversationId}`
-      const inboxPayload = {
-        conversationId,
-        lastMessageAt: now,
-        lastMessagePreview: preview,
-        lastMessage: message,
+      const inboxPayload =
+        refreshedConversation == null
+          ? {
+              conversationId,
+              lastMessageAt: now,
+              lastMessagePreview: preview,
+              lastMessage: message,
+            }
+          : {
+              conversation: serializeConversation(refreshedConversation),
+              lastMessage: message,
+            }
+
+      try {
+        await pusherClient.trigger(conversationChannel, "message:new", {
+          message,
+        })
+
+        console.log("pusher event sent", {
+          event: "message:new",
+          channel: conversationChannel,
+        })
+
+        const inboxChannels = [
+          `private-user-${participantCheck.conversation.passengerId}`,
+          `private-user-${participantCheck.conversation.driverId}`,
+        ]
+
+        await Promise.all([
+          ...inboxChannels.map((channel) =>
+            pusherClient.trigger(channel, "conversation:updated", inboxPayload)
+          ),
+          pusherClient.trigger(`private-user-${recipientId}`, "notification:new", {
+            title: "New message",
+            body: notificationBody,
+            type: "system",
+            data: {
+              conversationId,
+              messageId: message.id,
+              kind: "chat_message",
+            },
+          }),
+        ])
+
+        console.log("pusher event sent", {
+          event: "conversation:updated",
+          channels: inboxChannels,
+        })
+      } catch (realtimeErr) {
+        console.error("chat realtime broadcast failed", {
+          conversationId,
+          messageId: message.id,
+          realtimeErr,
+        })
       }
-
-      await pusherClient.trigger(conversationChannel, "message:new", {
-        message,
-      })
-
-      console.log("pusher event sent", {
-        event: "message:new",
-        channel: conversationChannel,
-      })
-
-      const inboxChannels = [
-        `private-user-${participantCheck.conversation.passengerId}`,
-        `private-user-${participantCheck.conversation.driverId}`,
-      ]
-
-      await Promise.all(
-        inboxChannels.map((channel) =>
-          pusherClient.trigger(channel, "conversation:updated", inboxPayload)
-        )
-      )
-
-      console.log("pusher event sent", {
-        event: "conversation:updated",
-        channels: inboxChannels,
-      })
     }
 
     return res.status(201).json(message)

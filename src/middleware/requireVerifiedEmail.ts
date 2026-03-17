@@ -1,6 +1,7 @@
 // src/middleware/requireVerifiedEmail.ts
 import type { Response, NextFunction } from "express"
 import prisma from "../lib/prisma.js"
+import { isAppReviewEmail } from "../lib/appReview.js"
 import { AuthRequest } from "./auth.js"
 
 export async function requireVerifiedEmail(
@@ -19,7 +20,7 @@ export async function requireVerifiedEmail(
 
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
-      select: { id: true, emailVerified: true },
+      select: { id: true, email: true, emailVerified: true },
     })
 
     if (!user) {
@@ -30,6 +31,10 @@ export async function requireVerifiedEmail(
     }
 
     if (!user.emailVerified) {
+      if (isAppReviewEmail(user.email)) {
+        return next()
+      }
+
       return res.status(403).json({
         error: "Email verification required",
         code: "EMAIL_NOT_VERIFIED",

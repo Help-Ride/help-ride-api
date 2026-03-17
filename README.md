@@ -12,6 +12,7 @@ It powers Flutter clients for passengers and drivers, using PostgreSQL (Neon) + 
 - **ORM:** Prisma
 - **Auth:** JWT (access + refresh), email/password, OAuth (Google / Apple-ready)
 - **Email:** Resend (for email verification OTP)
+- **SMS:** Twilio (for phone OTP + text notifications)
 - **Storage:** AWS S3 (driver documents)
 - **Realtime:** Pusher (chat)
 - **Deployment:** Vercel (Serverless API)
@@ -82,6 +83,12 @@ JWT_REFRESH_SECRET="your-strong-refresh-secret"
 RESEND_API_KEY="re_xxx"
 EMAIL_FROM="HelpRide <noreply@exocodelabs.tech>"
 
+# SMS (Twilio)
+TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+TWILIO_AUTH_TOKEN="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+TWILIO_FROM_PHONE="+14165551234"
+TWILIO_SMS_NOTIFICATIONS_ENABLED=true
+
 # AWS S3 (Driver documents)
 AWS_S3_BUCKET="your-bucket-name"
 AWS_REGION="us-east-1"
@@ -97,6 +104,20 @@ PUSHER_CLUSTER="your-cluster"
 # Stripe
 STRIPE_SECRET_KEY="sk_test_..."
 STRIPE_WEBHOOK_SECRET="whsec_..."
+STRIPE_CONNECT_REFRESH_URL="https://api.example.com/api/stripe/connect/refresh"
+STRIPE_CONNECT_RETURN_URL="https://api.example.com/api/stripe/connect/return"
+# Recommended: dedicated secret for signed Stripe Connect state token
+STRIPE_CONNECT_STATE_SECRET="replace-with-strong-secret"
+# Optional app handoff URL (deep link / universal link target)
+# STRIPE_CONNECT_APP_RETURN_URL="https://app.example.com/stripe/return"
+# Optional (default: CA)
+# STRIPE_CONNECT_COUNTRY="CA"
+# Optional business profile prefill for Connect onboarding
+# STRIPE_CONNECT_BUSINESS_PROFILE_URL="https://helpride.com"
+# STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION="Ride-sharing transportation services through HelpRide app"
+# STRIPE_CONNECT_BUSINESS_PROFILE_MCC="4121"
+# Optional: enable /api/stripe/connect/reset endpoint (test keys only)
+# STRIPE_CONNECT_RESET_ENABLED=false
 PAYMENT_PLATFORM_FEE_PCT=0.15
 # Optional backward-compatible alias:
 # STRIPE_PLATFORM_FEE_PCT=0.15
@@ -116,6 +137,13 @@ PAYMENT_TAX_BPS=0
 # App
 NODE_ENV="development"        # or "production"
 PORT=4000                     # local dev port
+
+# Optional App Review email-verification bypass (strict allowlist)
+APP_REVIEW_BYPASS_EMAIL_VERIFICATION=false
+# Single email:
+APP_REVIEW_EMAIL="reviewer@example.com"
+# Or comma-separated list:
+# APP_REVIEW_EMAILS="reviewer1@example.com,reviewer2@example.com"
 ```
 
 Prisma uses `DATABASE_URL` to connect to Neon.
@@ -472,6 +500,20 @@ Used on routes like `/rides`, `/bookings`, `/ride-requests`, `/drivers` (POST).
 
 - Partial update of the current user's profile.
 
+### Upload Profile Photo (Presign)
+
+`POST /api/users/:id/avatar/presign` (JWT – must match current user)
+
+```json
+{
+  "fileName": "avatar.png",
+  "mimeType": "image/png"
+}
+```
+
+- Returns a presigned S3 upload URL.
+- Updates `providerAvatarUrl` to a backend avatar URL (`/api/users/:id/avatar?...`) that works with private S3 buckets.
+
 ---
 
 ## Driver Profile Module
@@ -570,12 +612,17 @@ Single-car model for now (one `DriverProfile` per `User`).
   "toLng": -79.3832,
   "startTime": "2025-12-15T14:00:00.000Z",
   "arrivalTime": "2025-12-15T16:30:00.000Z",
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["ac", "wifi", "music"],
+  "additionalNotes": "Pickup near the front entrance",
   "pricePerSeat": 20.5,
   "seatsTotal": 3
 }
 ```
 
-- Validates coordinates, start time, and optional `arrivalTime`.
+- Optional fields: `arrivalTime`, `stops`, `amenities`, `additionalNotes`.
+- Allowed `amenities`: `ac`, `music`, `wifi`, `pet_friendly`, `luggage_space`, `child_seat`.
+- Validates coordinates, start time, seat/price values, and optional fields.
 - Ensures `arrivalTime > startTime` when provided.
 - Initializes `seatsAvailable = seatsTotal` and `status = "open"`.
 
@@ -604,6 +651,9 @@ Single-car model for now (one `DriverProfile` per `User`).
 
 ```json
 {
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["wifi", "pet_friendly"],
+  "additionalNotes": "Luggage space available",
   "startTime": "2025-12-15T15:00:00.000Z",
   "arrivalTime": "2025-12-15T17:00:00.000Z",
   "pricePerSeat": 22.5
@@ -611,7 +661,12 @@ Single-car model for now (one `DriverProfile` per `User`).
 ```
 
 - Validates times and allows updating `arrivalTime` (or clearing it by sending `null` / empty string).
-- Leaves `seatsAvailable` unchanged for now (can be improved later).
+- Allows clearing optional fields with `null`:
+  - `arrivalTime: null`
+  - `stops: null` (clears to empty array)
+  - `amenities: null` (clears to empty array)
+  - `additionalNotes: null`
+- If `seatsTotal` is updated, `seatsAvailable` is adjusted with bounds (`0..seatsTotal`).
 
 ### Delete Ride
 

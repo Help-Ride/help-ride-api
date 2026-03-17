@@ -46,6 +46,10 @@ router.delete(
 )
 
 // Driver documents (S3)
+router.post("/me/documents/presign", authGuard, createDriverDocumentPresign)
+router.get("/me/documents", authGuard, listDriverDocuments)
+
+// Legacy aliases
 router.post("/:id/documents/presign", authGuard, createDriverDocumentPresign)
 router.get("/:id/documents", authGuard, listDriverDocuments)
 

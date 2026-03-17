@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js"
 import { firebaseAdmin, firebaseConfigured } from "./firebase.js"
+import { sendTextNotificationsSms } from "./twilio.js"
 
 type NotificationPayload = {
   userId: string
@@ -18,10 +19,25 @@ type BroadcastPayload = {
   excludeUserId?: string
 }
 
+type MultiUserPayload = {
+  userIds: string[]
+  title: string
+  body: string
+  type?: "ride_update" | "payment" | "system"
+  data?: Record<string, string | number | boolean>
+}
+
 const INVALID_TOKEN_ERRORS = new Set([
   "messaging/invalid-registration-token",
   "messaging/registration-token-not-registered",
 ])
+
+type PushDispatchResult = {
+  attemptedTokens: number
+  successCount: number
+  failureCount: number
+  invalidTokensDeleted: number
+}
 
 function serializeData(
   data?: Record<string, string | number | boolean>
@@ -30,6 +46,35 @@ function serializeData(
   return Object.fromEntries(
     Object.entries(data).map(([key, value]) => [key, String(value)])
   )
+}
+
+async function sendSmsToUserIds(userIds: string[], title: string, body: string) {
+  if (userIds.length === 0) {
+    return
+  }
+
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        phone: { not: null },
+        phoneVerified: true,
+      },
+      select: { phone: true },
+    })
+
+    const phones = Array.from(
+      new Set(
+        users
+          .map((user) => user.phone)
+          .filter((phone): phone is string => typeof phone === "string")
+      )
+    )
+
+    await sendTextNotificationsSms({ phones, title, body })
+  } catch (err) {
+    console.error("sms notification send error", err)
+  }
 }
 
 export async function notifyUser(payload: NotificationPayload) {
@@ -48,6 +93,7 @@ export async function notifyUser(payload: NotificationPayload) {
       body: payload.body,
       data: { notificationId: notification.id, ...(payload.data ?? {}) },
     })
+    await sendSmsToUserIds([payload.userId], payload.title, payload.body)
 
     return notification
   } catch (err) {
@@ -63,9 +109,14 @@ export async function sendPushToUser(
     body: string
     data?: Record<string, string | number | boolean>
   }
-) {
+): Promise<PushDispatchResult> {
   if (!firebaseConfigured || !firebaseAdmin) {
-    return
+    return {
+      attemptedTokens: 0,
+      successCount: 0,
+      failureCount: 0,
+      invalidTokensDeleted: 0,
+    }
   }
 
   const tokens = await prisma.deviceToken.findMany({
@@ -74,10 +125,15 @@ export async function sendPushToUser(
   })
 
   if (tokens.length === 0) {
-    return
+    return {
+      attemptedTokens: 0,
+      successCount: 0,
+      failureCount: 0,
+      invalidTokensDeleted: 0,
+    }
   }
 
-  await sendPushToTokens(tokens.map((t) => t.token), payload)
+  return sendPushToTokens(tokens.map((t) => t.token), payload)
 }
 
 async function sendPushToTokens(
@@ -87,13 +143,20 @@ async function sendPushToTokens(
     body: string
     data?: Record<string, string | number | boolean>
   }
-) {
+): Promise<PushDispatchResult> {
   if (!firebaseConfigured || !firebaseAdmin || tokens.length === 0) {
-    return
+    return {
+      attemptedTokens: 0,
+      successCount: 0,
+      failureCount: 0,
+      invalidTokensDeleted: 0,
+    }
   }
 
   const data = serializeData(payload.data)
   const invalidTokens: string[] = []
+  let successCount = 0
+  let failureCount = 0
 
   for (let i = 0; i < tokens.length; i += 500) {
     const batch = tokens.slice(i, i + 500)
@@ -104,9 +167,47 @@ async function sendPushToTokens(
         body: payload.body,
       },
       data,
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+        },
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert",
+        },
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
     })
 
+    successCount += response.successCount
+    failureCount += response.failureCount
+
     if (response.failureCount > 0) {
+      const failureCodes = response.responses
+        .filter((result) => !result.success)
+        .map((result) => result.error?.code ?? "unknown")
+
+      const failureCodeSummary = failureCodes.reduce<Record<string, number>>(
+        (acc, code) => {
+          acc[code] = (acc[code] ?? 0) + 1
+          return acc
+        },
+        {}
+      )
+
+      console.error("FCM push failures detected", {
+        batchSize: batch.length,
+        failureCount: response.failureCount,
+        failureCodes: failureCodeSummary,
+      })
+
       response.responses.forEach((result, index) => {
         if (result.success) return
         const code = result.error?.code
@@ -121,6 +222,61 @@ async function sendPushToTokens(
     await prisma.deviceToken.deleteMany({
       where: { token: { in: invalidTokens } },
     })
+  }
+
+  if (successCount === 0 && failureCount > 0) {
+    console.warn("No push notification was delivered", {
+      attemptedTokens: tokens.length,
+      failureCount,
+    })
+  }
+
+  return {
+    attemptedTokens: tokens.length,
+    successCount,
+    failureCount,
+    invalidTokensDeleted: invalidTokens.length,
+  }
+}
+
+export async function notifyUsersByIds(payload: MultiUserPayload) {
+  try {
+    const userIds = Array.from(
+      new Set(payload.userIds.filter((userId) => userId.trim().length > 0))
+    )
+
+    if (userIds.length === 0) {
+      return { notified: 0 }
+    }
+
+    await prisma.notification.createMany({
+      data: userIds.map((userId) => ({
+        userId,
+        title: payload.title,
+        body: payload.body,
+        type: payload.type ?? "system",
+      })),
+    })
+
+    const tokens = await prisma.deviceToken.findMany({
+      where: { userId: { in: userIds } },
+      select: { token: true },
+    })
+
+    await sendPushToTokens(
+      tokens.map((tokenRecord) => tokenRecord.token),
+      {
+        title: payload.title,
+        body: payload.body,
+        data: payload.data,
+      }
+    )
+    await sendSmsToUserIds(userIds, payload.title, payload.body)
+
+    return { notified: userIds.length }
+  } catch (err) {
+    console.error("multi-user notification broadcast error", err)
+    return { notified: 0 }
   }
 }
 
@@ -162,6 +318,7 @@ export async function notifyUsersByRole(payload: BroadcastPayload) {
         data: payload.data,
       }
     )
+    await sendSmsToUserIds(userIds, payload.title, payload.body)
 
     return { notified: userIds.length }
   } catch (err) {

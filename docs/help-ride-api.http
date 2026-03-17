@@ -4,9 +4,14 @@
 @baseUrl = http://localhost:4000/api
 # @baseUrl = https://dev-help-ride-api.vercel.app/api
 
+# App Review note:
+# Sign in with Apple is available on the login screen.
+# Account deletion is available at Profile > Delete Account.
+# Deleting an account automatically cancels active rides, bookings, ride requests, and open offers.
+
 # Fill these from responses as you test
-@accessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2ODM2NTE3NywiZXhwIjoxNzY4MzY2MDc3fQ.b2Lln5xs3MFe7kttBGRYTsWoYPX_y1FfQAte3R7BR_Y
-@driverAccessToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzYTgxYTMxZi05ZDdkLTQ4ZWQtYjUxMi1iMTZhN2I2NjMwMjUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2NTI2MjE5NywiZXhwIjoxNzY1MjYzMDk3fQ.Y_K0okOAProuG4MbH0RXFcuaR7A8P-e2696e1htCJ4g
+@accessToken = REPLACE_WITH_ACCESS_TOKEN
+@driverAccessToken = REPLACE_WITH_DRIVER_ACCESS_TOKEN
 @rideId = 694b7347-c73c-46ad-9e78-b58c1a8300a0
 @bookingId =
 @conversationId =
@@ -14,10 +19,16 @@
 @deviceToken =
 @userId = 7c52076e-7c14-4ab4-82c9-247c77e6d5de
 @driverId = 3a81a31f-9d7d-48ed-b512-b16a7b663025
+@driverDocumentId =
+@rideRequestId =
+@paymentId =
+@supportTicketId =
 @email = patel.rishi3001@gmail.com
+@phone = +12269789548
 @otp = 332576
 @resetOtp = 112233
 @realtimeSecret = replace-with-REALTIME_TO_API_SECRET
+@adminApiKey = replace-with-ADMIN_API_KEY
 
 ################################################
 ### 🩺 HEALTH CHECK
@@ -28,17 +39,31 @@ Accept: application/json
 ###
 
 ################################################
+### 📚 API DOCS / ENDPOINT TESTER
+################################################
+GET {{baseUrl}}/docs
+Accept: text/html
+
+###
+
+GET {{baseUrl}}/docs/openapi.json
+Accept: application/json
+
+###
+
+################################################
 ### 🔐 AUTH – EMAIL/PASSWORD + OTP
 ################################################
 
 ### REGISTER WITH EMAIL/PASSWORD
-# Triggers an email OTP for verification.
+# Phone is required for standard signup and SMS ride alerts.
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
 {
   "name": "Email User",
   "email": "{{email}}",
+  "phone": "{{phone}}",
   "password": "StrongPass123!"
 }
 
@@ -46,13 +71,28 @@ Content-Type: application/json
 
 ### LOGIN WITH EMAIL/PASSWORD
 # Use same email/password as above.
-# Note: login sends OTP; tokens are returned by verify-otp.
+# Password login returns tokens immediately.
+# For passwordless sign-in, use the email or phone OTP endpoints below.
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
   "email": "{{email}}",
   "password": "StrongPass123!"
+}
+
+###
+
+### LOGIN WITH LOCATION SNAPSHOT (OPTIONAL)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "StrongPass123!",
+  "lat": 43.4643,
+  "lng": -80.5204,
+  "accuracyMeters": 15
 }
 
 ###
@@ -81,6 +121,7 @@ Content-Type: application/json
 ###
 
 ### RESEND EMAIL VERIFICATION OTP
+# Can also be used as a passwordless email sign-in step.
 POST {{baseUrl}}/auth/verify-email/send-otp
 Content-Type: application/json
 
@@ -92,13 +133,37 @@ Content-Type: application/json
 
 ### VERIFY EMAIL WITH OTP
 # Replace {{otp}} with the 6-digit code from your email.
-# Tokens are returned on success.
+# Tokens are returned on success for verification or passwordless login.
 POST {{baseUrl}}/auth/verify-email/verify-otp
 Content-Type: application/json
 
 {
   "email": "{{email}}",
   "otp": "112991"
+}
+
+###
+
+### SEND PHONE VERIFICATION OTP (SMS)
+# Can also be used as a passwordless SMS sign-in step.
+POST {{baseUrl}}/auth/verify-phone/send-otp
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}"
+}
+
+###
+
+### VERIFY PHONE WITH OTP (SMS)
+# Replace {{otp}} with the 6-digit code from SMS.
+# Tokens are returned on success for verification or passwordless login.
+POST {{baseUrl}}/auth/verify-phone/verify-otp
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "otp": "{{otp}}"
 }
 
 ###
@@ -113,6 +178,16 @@ Content-Type: application/json
 
 ###
 
+### SEND PASSWORD RESET OTP (SMS)
+POST {{baseUrl}}/auth/password-reset/send-otp-phone
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}"
+}
+
+###
+
 ### RESET PASSWORD WITH OTP
 # Replace {{resetOtp}} with the 6-digit code from your email.
 POST {{baseUrl}}/auth/password-reset/verify-otp
@@ -120,6 +195,19 @@ Content-Type: application/json
 
 {
   "email": "{{email}}",
+  "otp": "{{resetOtp}}",
+  "newPassword": "NewStrongPass123!"
+}
+
+###
+
+### RESET PASSWORD WITH OTP (SMS)
+# Replace {{resetOtp}} with the 6-digit code from SMS.
+POST {{baseUrl}}/auth/password-reset/verify-otp-phone
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
   "otp": "{{resetOtp}}",
   "newPassword": "NewStrongPass123!"
 }
@@ -139,7 +227,24 @@ Content-Type: application/json
   "providerUserId": "google-1234567890",
   "email": "testuser@example.com",
   "name": "Test User",
-  "avatarUrl": "https://example.com/avatar.png"
+  "avatarUrl": "https://example.com/avatar.png",
+  "lat": 43.4643,
+  "lng": -80.5204
+}
+
+###
+
+### OAUTH LOGIN (APPLE)
+# Include `identityToken` from the native Apple credential when available.
+POST {{baseUrl}}/auth/oauth
+Content-Type: application/json
+
+{
+  "provider": "apple",
+  "providerUserId": "apple-user-1234567890",
+  "email": "private-relay@example.com",
+  "name": "Apple User",
+  "identityToken": "eyJhbGciOi..."
 }
 
 ###
@@ -173,12 +278,36 @@ Accept: application/json
 ###
 
 ### UPDATE OWN USER PROFILE
+# If `phone` changes, `phoneVerified` is reset until the new number is verified.
 PUT {{baseUrl}}/users/{{userId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "name": "Updated Name"
+  "name": "Updated Name",
+  "phone": "{{phone}}"
+}
+
+###
+
+### DELETE MY ACCOUNT
+# Deletes the current account and automatically cancels active rides/bookings/requests/offers.
+# Any refunds or driver payouts already in progress continue processing after deletion.
+DELETE {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+
+###
+
+### UPDATE MY LIVE LOCATION (CALL ON LOGIN / APP OPEN)
+PUT {{baseUrl}}/users/me/location
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "lat": 43.4643,
+  "lng": -80.5204,
+  "accuracyMeters": 12,
+  "recordedAt": "2026-02-11T10:20:00.000Z"
 }
 
 ###
@@ -186,6 +315,27 @@ Content-Type: application/json
 ################################################
 ### 🚗 RIDES – DRIVER FLOW
 ################################################
+
+###########################################
+### 💸 RIDE PRICING PREVIEW (driver only)
+###########################################
+POST {{baseUrl}}/rides/pricing-preview
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "seatsTotal": 3,
+  "pricePerSeat": 0
+}
+
+###
 
 ###########################################
 ### 🚗 CREATE RIDE  (requires driver token)
@@ -203,16 +353,26 @@ Content-Type: application/json
   "toLng": -79.3832,
   "startTime": "2025-12-20T08:00:00.000Z",
   "arrivalTime": "2025-12-21T08:00:00.000Z",
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["ac", "wifi", "music"],
+  "additionalNotes": "Pickup near front entrance",
+  "rideType": "recurring",
+  "recurrenceDays": ["monday", "wednesday", "friday"],
+  "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
+  "occurrenceStartTimes": [
+    "2025-12-22T13:00:00.000Z",
+    "2025-12-24T13:00:00.000Z",
+    "2025-12-26T13:00:00.000Z"
+  ],
   "seatsTotal": 1,
-  "rideType": "one-time",
-  "tripType": "one-way",
-  "pricePerSeat":22
+  "pricePerSeat": 22
 }
 
 ###
 
 ###########################################
 ### ✏️ UPDATE RIDE (driver only)
+# `pricePerSeat` is locked after ride creation and should not be sent here.
 ###########################################
 PUT {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
@@ -227,10 +387,10 @@ Content-Type: application/json
   "toLng": -79.3832,
   "startTime": "2025-12-20T08:00:00.000Z",
   "arrivalTime": "2025-12-21T08:00:00.000Z",
-  "seatsTotal": 1,
-  "rideType": "one-time",
-  "tripType": "one-way",
-  "pricePerSeat":22
+  "stops": ["Downtown", "Union Station"],
+  "amenities": ["wifi", "pet_friendly"],
+  "additionalNotes": "Luggage space available",
+  "seatsTotal": 1
 }
 
 ###
@@ -245,6 +405,38 @@ Accept: application/json
 ### SEARCH RIDES (GEOLOCATION)
 GET {{baseUrl}}/rides?fromLat=43.4643&fromLng=-80.5204&toLat=43.6532&toLng=-79.3832&radiusKm=25&seats=1
 Accept: application/json
+
+###
+
+### CREATE RECURRING RIDE (driver only)
+# `rideType` should be `recurring`. The API also treats recurrence metadata as a
+# recurring create request, so it will not silently downgrade to `one-time`.
+POST {{baseUrl}}/rides
+Authorization: Bearer {{driverAccessToken}}
+Content-Type: application/json
+
+{
+  "fromCity": "Waterloo",
+  "fromLat": 43.4643,
+  "fromLng": -80.5204,
+  "toCity": "Toronto",
+  "toLat": 43.6532,
+  "toLng": -79.3832,
+  "startTime": "2025-12-22T13:00:00.000Z",
+  "seatsTotal": 3,
+  "pricePerSeat": 22,
+  "rideType": "recurring",
+  "recurrenceDays": ["monday", "wednesday", "friday"],
+  "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
+  "occurrenceStartTimes": [
+    "2025-12-22T13:00:00.000Z",
+    "2025-12-24T13:00:00.000Z",
+    "2025-12-26T13:00:00.000Z"
+  ],
+  "stops": ["Downtown"],
+  "amenities": ["wifi"],
+  "additionalNotes": "Recurring commute"
+}
 
 ###
 
@@ -269,6 +461,7 @@ Accept: application/json
 ###
 
 ### UPDATE RIDE (driver only)
+# `pricePerSeat` is locked after ride creation and should not be sent here.
 PUT {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -281,7 +474,10 @@ Content-Type: application/json
   "toLat": 43.6532,
   "toLng": -79.3832,
   "startTime": "2025-12-15T15:00:00.000Z",
-  "pricePerSeat": 22.5,
+  "arrivalTime": "2025-12-15T17:00:00.000Z",
+  "stops": ["Union Station"],
+  "amenities": ["wifi", "child_seat"],
+  "additionalNotes": "One small luggage allowed",
   "seatsTotal": 4
 }
 
@@ -387,28 +583,28 @@ Accept: application/json
 
 ### DRIVER: GET BOOKINGS FOR A RIDE
 GET {{baseUrl}}/bookings/ride/{{rideId}}
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
 
 ###
 
 ### DRIVER: INBOX (PAGINATED BOOKINGS)
 GET {{baseUrl}}/bookings/driver/me?status=pending&limit=50&cursor=
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
 
 ###
 
 ### DRIVER: CONFIRM BOOKING
 PUT {{baseUrl}}/bookings/{{bookingId}}/confirm
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
 
 ###
 
 ### DRIVER: REJECT BOOKING
 PUT {{baseUrl}}/bookings/{{bookingId}}/reject
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
 
 ###
@@ -440,7 +636,7 @@ Accept: application/json
 ### DRIVER: CANCEL PASSENGER BOOKING
 # If booking was paid, refund is initiated automatically.
 POST {{baseUrl}}/bookings/{{bookingId}}/driver-cancel
-Authorization: Bearer {{accessToken}}
+Authorization: Bearer {{driverAccessToken}}
 Accept: application/json
 
 ###
@@ -476,6 +672,14 @@ Content-Type: application/json
 GET {{baseUrl}}/chat/conversations
 Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+# Response now includes ride-linked context such as:
+# - rideReference
+# - tripSummary
+# - tripTime / tripTimeLabel
+# - rideStatus
+# - ridePricePerSeat
+# - nested ride object
 
 ###
 
@@ -542,6 +746,14 @@ Content-Type: application/json
 
 ###
 
+### CHECK CURRENT USER ROLE AFTER DRIVER PROFILE CREATE
+# Expect: roleDefault = "driver"
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### DRIVER SUMMARY (RIDES + EARNINGS)
 GET {{baseUrl}}/drivers/me/summary
 Authorization: Bearer {{driverAccessToken}}
@@ -594,11 +806,20 @@ Authorization: Bearer {{accessToken}}
 
 ###
 
+### CHECK CURRENT USER ROLE AFTER DRIVER PROFILE DELETE
+# Expect: roleDefault = "passenger"
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ################################################
 ### 📌 RIDE REQUESTS (WHEN NO MATCHING RIDES)
 ################################################
 
 ### CREATE JIT PAYMENT INTENT (PASSENGER, <= 2 HOURS TO DEPARTURE)
+# On successful payment webhook, ride request is created and nearby drivers are notified.
 POST {{baseUrl}}/ride-requests/jit/intent
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -621,6 +842,7 @@ Content-Type: application/json
 
 ### CREATE RIDE REQUEST (PASSENGER, VERIFIED)
 # NOTE: For departures within 2 hours, call /ride-requests/jit/intent first.
+# Nearby drivers (with recent location updates) are notified automatically.
 POST {{baseUrl}}/ride-requests
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -803,6 +1025,23 @@ Content-Type: application/json
 
 ###
 
+### TRIGGER TEST PUSH NOTIFICATION
+POST {{baseUrl}}/notifications/test-push
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "Test push from API",
+  "body": "This is a manual test notification.",
+  "type": "system",
+  "data": {
+    "source": "manual-test",
+    "build": 1
+  }
+}
+
+###
+
 ### MARK NOTIFICATION READ
 POST {{baseUrl}}/notifications/{{notificationId}}/read
 Authorization: Bearer {{accessToken}}
@@ -833,13 +1072,25 @@ Content-Type: application/json
 
 ###
 
-### 🔐 Get upload URL for driver document (license)
-POST {{baseUrl}}/drivers/{{userId}}/documents/presign
+### UPLOAD MY PROFILE PHOTO (PRESIGN + PRIVATE-BUCKET-SAFE AVATAR URL)
+POST {{baseUrl}}/users/{{userId}}/avatar/presign
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "type": "license",
+  "fileName": "my-profile-photo.png",
+  "mimeType": "image/png"
+}
+
+###
+
+### 🔐 Get upload URL for driver document (registration alias -> ownership)
+POST {{baseUrl}}/drivers/me/documents/presign
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "type": "registration",
   "fileName": "Rishi_logo.png",
   "mimeType": "image/jpeg"
 }
@@ -847,7 +1098,7 @@ Content-Type: application/json
 ###
 
 ### 📄 List my driver documents
-GET {{baseUrl}}/drivers/{{userId}}/documents
+GET {{baseUrl}}/drivers/me/documents
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
@@ -897,10 +1148,10 @@ DELETE {{baseUrl}}/fixed-route-prices/{{fixedRoutePriceId}}
 Authorization: Bearer {{accessToken}}
 
 ################################################
-### 💳 STRIPE PAYMENTS (PHASE 1: PLATFORM COLLECTION)
+### 💳 STRIPE PAYMENTS + CONNECT
 ################################################
-# Passenger funds go to HelpRide Stripe account.
-# Driver payouts are tracked in DB and settled manually.
+# Passenger funds are collected into HelpRide Stripe account.
+# Driver payouts are sent via Stripe Connect transfer from admin endpoint.
 
 ### CREATE PAYMENT INTENT (Passenger)
 POST {{baseUrl}}/payments/intent
@@ -923,6 +1174,54 @@ Accept: application/json
 
 ###
 
+### CREATE/REFRESH STRIPE CONNECT ONBOARDING LINK (DRIVER)
+POST {{baseUrl}}/stripe/connect/onboard
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### GET STRIPE CONNECT STATUS (DRIVER)
+GET {{baseUrl}}/stripe/connect/status
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### CREATE STRIPE EXPRESS DASHBOARD LOGIN LINK (DRIVER)
+POST {{baseUrl}}/stripe/connect/dashboard-link
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### RESET STRIPE CONNECT ACCOUNT + GET NEW ONBOARDING LINK (DRIVER, TEST ONLY)
+POST {{baseUrl}}/stripe/connect/reset
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "confirm": "RESET_STRIPE_CONNECT"
+}
+
+###
+
+# Set `state` from onboarding/refresh redirect URL query param
+@connectState =
+
+### STRIPE CONNECT REFRESH (PUBLIC REDIRECT ENDPOINT)
+GET {{baseUrl}}/stripe/connect/refresh?state={{connectState}}
+Accept: application/json
+
+###
+
+### STRIPE CONNECT RETURN (PUBLIC REDIRECT ENDPOINT)
+GET {{baseUrl}}/stripe/connect/return?state={{connectState}}&format=json
+Accept: application/json
+
+###
+
 ### STRIPE WEBHOOK (LOCAL DEV - RUN IN TERMINAL)
 # stripe listen --forward-to localhost:4000/api/webhooks/stripe
 
@@ -930,3 +1229,274 @@ Accept: application/json
 # Expiry: Any future date (e.g. 12/34)
 # CVC: Any 3 digits (e.g. 123)
 # ZIP / Postal: Any (e.g. A1A1A1 or 12345)
+
+################################################
+### 🛠️ ADMIN API (x-admin-api-key)
+################################################
+
+### LIST DRIVERS
+GET {{baseUrl}}/admin/drivers?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### GET DRIVER DETAILS
+GET {{baseUrl}}/admin/drivers/{{driverId}}
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### VERIFY DRIVER (approve|reject)
+POST {{baseUrl}}/admin/drivers/{{driverId}}/verify
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "action": "approve",
+  "reason": "All checks passed",
+  "sendNotification": true
+}
+
+###
+
+### REVIEW DRIVER DOCUMENT
+PATCH {{baseUrl}}/admin/drivers/{{driverId}}/documents/{{driverDocumentId}}
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "status": "approved",
+  "reviewNotes": "Looks valid"
+}
+
+###
+
+### GET DRIVER DOCUMENT URL
+GET {{baseUrl}}/admin/drivers/{{driverId}}/documents/{{driverDocumentId}}/url?expiresIn=3600
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### REQUEST ADDITIONAL DRIVER DOCS
+POST {{baseUrl}}/admin/drivers/{{driverId}}/documents/request
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "documentType": "insurance",
+  "reason": "Current policy is expired"
+}
+
+###
+
+### LIST RIDES
+GET {{baseUrl}}/admin/rides?status=open&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CREATE RIDE (ADMIN)
+POST {{baseUrl}}/admin/rides
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "driverId": "{{driverId}}",
+  "fromCity": "Toronto",
+  "fromLat": 43.6532,
+  "fromLng": -79.3832,
+  "toCity": "Waterloo",
+  "toLat": 43.4643,
+  "toLng": -80.5204,
+  "startTime": "2026-03-10T15:00:00.000Z",
+  "pricePerSeat": 32.5,
+  "seatsTotal": 3
+}
+
+###
+
+### BULK CREATE RIDES
+POST {{baseUrl}}/admin/rides/bulk
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "driverId": "{{driverId}}",
+  "rides": [
+    {
+      "clientRowId": "r-1",
+      "fromCity": "Toronto",
+      "fromLat": 43.6532,
+      "fromLng": -79.3832,
+      "toCity": "Kitchener",
+      "toLat": 43.4516,
+      "toLng": -80.4925,
+      "startTime": "2026-03-11T14:00:00.000Z",
+      "pricePerSeat": 30,
+      "seatsTotal": 3
+    }
+  ]
+}
+
+###
+
+### UPDATE RIDE STATUS
+PUT {{baseUrl}}/admin/rides/{{rideId}}/status
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "status": "in_progress",
+  "sendNotification": true
+}
+
+###
+
+### LIST ELIGIBLE DRIVERS FOR RIDE
+GET {{baseUrl}}/admin/rides/{{rideId}}/eligible-drivers?limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### LIST RIDE REQUESTS
+GET {{baseUrl}}/admin/ride-requests?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CREATE OFFER FOR REQUEST
+POST {{baseUrl}}/admin/ride-requests/{{rideRequestId}}/offers
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "rideId": "{{rideId}}",
+  "seatsOffered": 1
+}
+
+###
+
+### LIST BOOKINGS
+GET {{baseUrl}}/admin/bookings?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CONFIRM BOOKING (ADMIN)
+PUT {{baseUrl}}/admin/bookings/{{bookingId}}/confirm
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "reason": "Manual approval"
+}
+
+###
+
+### CANCEL BOOKING (ADMIN)
+PUT {{baseUrl}}/admin/bookings/{{bookingId}}/cancel
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "reason": "Admin override",
+  "refundRequired": true
+}
+
+###
+
+### LIST PAYMENTS
+GET {{baseUrl}}/admin/payments?status=pending&page=1&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### MARK PAYMENT AS PAID (ADMIN OVERRIDE)
+PUT {{baseUrl}}/admin/payments/{{paymentId}}/mark-paid
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "notes": "Confirmed via offline transfer"
+}
+
+###
+
+### PAY OUT DRIVER FOR PAYMENT (ADMIN)
+POST {{baseUrl}}/admin/payments/{{paymentId}}/payout
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### REFUND PAYMENT (ADMIN)
+# Requires no existing driver payout transfer for the payment.
+POST {{baseUrl}}/admin/payments/{{paymentId}}/refund
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+Idempotency-Key: refund-{{$timestamp}}
+
+{
+  "reason": "Service disruption",
+  "amount": 10
+}
+
+###
+
+### DASHBOARD STATS
+GET {{baseUrl}}/admin/dashboard/stats?dateFrom=2026-01-01&dateTo=2026-02-01
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### GLOBAL SEARCH
+GET {{baseUrl}}/admin/search?q=toronto&types=rides,drivers,bookings,users&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### SUPPORT TICKETS (ADMIN)
+GET {{baseUrl}}/admin/support-tickets?status=open&limit=20
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json
+
+###
+
+### CREATE SUPPORT TICKET (ADMIN)
+POST {{baseUrl}}/admin/support-tickets
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "subject": "Manual incident follow-up",
+  "description": "Driver and passenger reported a route issue."
+}
+
+###
+
+### RESOLVE SUPPORT TICKET (ADMIN)
+POST {{baseUrl}}/admin/support-tickets/{{supportTicketId}}/resolve
+x-admin-api-key: {{adminApiKey}}
+Content-Type: application/json
+
+{
+  "resolution": "Issue resolved and user informed."
+}
+
+###
+
+### PLATFORM SETTINGS (ALIAS OF APP CONFIG)
+GET {{baseUrl}}/admin/settings
+x-admin-api-key: {{adminApiKey}}
+Accept: application/json

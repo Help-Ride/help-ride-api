@@ -30,6 +30,15 @@ enum RideStatus {
   cancelled
 }
 
+enum RideAmenity {
+  ac
+  music
+  wifi
+  pet_friendly
+  luggage_space
+  child_seat
+}
+
 enum BookingStatus {
   pending
   confirmed
@@ -102,12 +111,16 @@ model User {
   roleDefault               RoleDefault      @default(passenger)
   providerAvatarUrl         String?
   emailVerified             Boolean          @default(false)
+  phoneVerified             Boolean          @default(false)
   stripeAccountId           String?          @unique
+  deletedAt                 DateTime?
 
-  // 🔽 NEW FIELDS FOR EMAIL OTP
   emailVerifyOtp            String?
   emailVerifyOtpExpiresAt   DateTime?
   emailVerifyOtpAttempts    Int              @default(0)
+  phoneVerifyOtp            String?
+  phoneVerifyOtpExpiresAt   DateTime?
+  phoneVerifyOtpAttempts    Int              @default(0)
   passwordResetOtp          String?
   passwordResetOtpExpiresAt DateTime?
   passwordResetOtpAttempts  Int              @default(0)
@@ -131,6 +144,7 @@ model User {
   messages               Message[]
   deviceTokens           DeviceToken[]
   supportTickets         SupportTicket[]
+  userLocation           UserLocation?
 }
 
 model OAuthAccount {
@@ -191,9 +205,16 @@ model Ride {
   toLng           Float
   startTime       DateTime
   arrivalTime     DateTime?
+  stops           String[]     @default([])
+  amenities       RideAmenity[] @default([])
+  additionalNotes String?
   pricePerSeat    Decimal      @db.Decimal(10, 2)
   seatsTotal      Int
   seatsAvailable  Int
+  rideType        String       @default("one-time")
+  recurringSeriesId String?
+  recurrenceDays  String[]     @default([])
+  recurrenceEndDate DateTime?
   status          RideStatus   @default(open)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -202,6 +223,8 @@ model Ride {
   sosEvents       SosEvent[]
   conversations   Conversation[]
   rideRequestOffers RideRequestOffer[]
+
+  @@index([recurringSeriesId])
 }
 
 model FixedRoutePrice {
@@ -245,6 +268,9 @@ model Payment {
   booking                Booking       @relation(fields: [bookingId], references: [id])
   bookingId              String
   paymentIntentId        String        @unique
+  driverTransferId       String?       @unique
+  driverTransferAmountCents Int?
+  driverTransferredAt    DateTime?
   amountCents            Int
   platformFeeCents       Int
   currency               String        @default("cad")
@@ -276,6 +302,21 @@ model DeviceToken {
   updatedAt DateTime        @updatedAt
 
   @@index([userId])
+}
+
+model UserLocation {
+  id             String   @id @default(uuid())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String   @unique
+  lat            Float
+  lng            Float
+  accuracyMeters Float?
+  recordedAt     DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([lat, lng])
+  @@index([updatedAt])
 }
 
 model SosEvent {

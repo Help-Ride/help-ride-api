@@ -1,5 +1,5 @@
 // src/routes/index.ts
-import type { Express } from "express"
+import type { Express, Router } from "express"
 import authRoutes from "./auth.routes.js"
 import rideRoutes from "./ride.routes.js"
 import bookingRoutes from "./booking.routes.js"
@@ -14,18 +14,24 @@ import paymentRoutes from "./payment.routes.js"
 import supportTicketRoutes from "./supportTicket.routes.js"
 import adminRoutes from "./admin.routes.js"
 
+export const API_ROUTE_MOUNTS: Array<{ path: string; router: Router }> = [
+  { path: "/auth", router: authRoutes },
+  { path: "/rides", router: rideRoutes },
+  { path: "/bookings", router: bookingRoutes },
+  { path: "/drivers", router: driverRoutes },
+  { path: "/ride-requests", router: rideRequestRoutes },
+  { path: "/fixed-route-prices", router: fixedRoutePriceRoutes },
+  { path: "/users", router: userRoutes },
+  { path: "/chat", router: chatRoutes },
+  { path: "/notifications", router: notificationRoutes },
+  { path: "/stripe", router: stripeRoutes },
+  { path: "/payments", router: paymentRoutes },
+  { path: "/support-tickets", router: supportTicketRoutes },
+  { path: "/admin", router: adminRoutes },
+]
+
 export function registerRoutes(app: Express) {
-  app.use("/api/auth", authRoutes)
-  app.use("/api/rides", rideRoutes)
-  app.use("/api/bookings", bookingRoutes)
-  app.use("/api/drivers", driverRoutes)
-  app.use("/api/ride-requests", rideRequestRoutes)
-  app.use("/api/fixed-route-prices", fixedRoutePriceRoutes)
-  app.use("/api/users", userRoutes)
-  app.use("/api/chat", chatRoutes)
-  app.use("/api/notifications", notificationRoutes)
-  app.use("/api/stripe", stripeRoutes)
-  app.use("/api/payments", paymentRoutes)
-  app.use("/api/support-tickets", supportTicketRoutes)
-  app.use("/api/admin", adminRoutes)
+  for (const mount of API_ROUTE_MOUNTS) {
+    app.use(`/api${mount.path}`, mount.router)
+  }
 }

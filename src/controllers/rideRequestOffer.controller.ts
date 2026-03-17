@@ -2,7 +2,7 @@
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { notifyUser } from "../lib/notifications.js"
+import { notifyUser, notifyUsersByIds } from "../lib/notifications.js"
 
 interface CreateOfferBody {
   rideId?: string
@@ -214,6 +214,8 @@ export async function listRideRequestOffers(req: AuthRequest, res: Response) {
             fromCity: true,
             toCity: true,
             startTime: true,
+            pricePerSeat: true,
+            seatsAvailable: true,
           },
         },
         driver: {
@@ -329,6 +331,18 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Not enough seats available" })
     }
 
+    const competingOffers = await prisma.rideRequestOffer.findMany({
+      where: {
+        rideRequestId: offer.rideRequestId,
+        status: { in: ["SENT", "pending"] },
+        NOT: { id: offer.id },
+      },
+      select: { driverId: true },
+    })
+    const competingDriverIds = Array.from(
+      new Set(competingOffers.map((competingOffer) => competingOffer.driverId))
+    )
+
     const [
       updatedOffer,
       updatedRequest,
@@ -416,6 +430,20 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
         kind: "ride_request_offer_accepted",
       },
     })
+
+    if (competingDriverIds.length > 0) {
+      await notifyUsersByIds({
+        userIds: competingDriverIds,
+        title: "Offer not selected",
+        body: `${offer.ride.fromCity} → ${offer.ride.toCity} was accepted by another driver`,
+        type: "ride_update",
+        data: {
+          rideRequestId: offer.rideRequestId,
+          offerId: offer.id,
+          kind: "ride_request_offer_not_selected",
+        },
+      })
+    }
 
     return res.json({
       offer: updatedOffer,

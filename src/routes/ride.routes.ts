@@ -4,6 +4,7 @@ import { authGuard } from "../middleware/auth.js"
 import { requireVerifiedEmail } from "../middleware/requireVerifiedEmail.js"
 import {
   createRide,
+  previewRidePricing,
   searchRides,
   getMyRides,
   getRideById,
@@ -23,6 +24,12 @@ router.get("/:id", getRideById)
 // Driver-only, verified email
 router.get("/me/list", authGuard, getMyRides)
 
+router.post(
+  "/pricing-preview",
+  authGuard,
+  requireVerifiedEmail,
+  previewRidePricing
+)
 router.post("/", authGuard, requireVerifiedEmail, createRide)
 router.put("/:id", authGuard, requireVerifiedEmail, updateRide)
 router.delete("/:id", authGuard, requireVerifiedEmail, deleteRide)

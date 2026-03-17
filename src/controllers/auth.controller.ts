@@ -8,8 +8,16 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from "../lib/jwt.js"
+import { isAppReviewEmail } from "../lib/appReview.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { sendEmailVerificationOtp, sendPasswordResetOtp } from "../lib/email.js"
+import {
+  isValidE164Phone,
+  normalizePhoneNumber,
+  sendPasswordResetOtpSms,
+  sendPhoneVerificationOtpSms,
+  TwilioNotConfiguredError,
+} from "../lib/twilio.js"
 
 interface OAuthBody {
   provider: "google" | "apple"
@@ -17,17 +25,27 @@ interface OAuthBody {
   email: string
   name: string
   avatarUrl?: string
+  identityToken?: string
+  lat?: number | string
+  lng?: number | string
+  accuracyMeters?: number | string | null
+  recordedAt?: string
 }
 
 interface RegisterBody {
   name: string
   email: string
   password: string
+  phone?: string
 }
 
 interface LoginBody {
   email: string
   password: string
+  lat?: number | string
+  lng?: number | string
+  accuracyMeters?: number | string | null
+  recordedAt?: string
 }
 
 interface RefreshBody {
@@ -40,23 +58,210 @@ interface ResetPasswordBody {
   newPassword: string
 }
 
+interface SendPhoneOtpBody {
+  phone: string
+}
+
+interface VerifyPhoneOtpBody {
+  phone: string
+  otp: string
+}
+
+interface ResetPasswordWithPhoneBody {
+  phone: string
+  otp: string
+  newPassword: string
+}
+
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+class LocationValidationError extends Error {}
+class PhoneValidationError extends Error {}
 
 function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex")
 }
 
+function parseNumber(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function parseNonEmptyString(value: unknown) {
+  if (typeof value !== "string") {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function decodeJwtPayload(token: string) {
+  const parts = token.split(".")
+  if (parts.length < 2) {
+    return null
+  }
+
+  try {
+    const payload = Buffer.from(parts[1], "base64url").toString("utf8")
+    const parsed = JSON.parse(payload)
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function extractAppleEmailFromIdentityToken(identityToken: unknown) {
+  const token = parseNonEmptyString(identityToken)
+  if (!token) {
+    return null
+  }
+
+  const payload = decodeJwtPayload(token)
+  return parseNonEmptyString(payload?.email)
+}
+
+function parsePhoneOrThrow(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new PhoneValidationError("phone is required")
+  }
+
+  const normalized = normalizePhoneNumber(value)
+  if (!isValidE164Phone(normalized)) {
+    throw new PhoneValidationError(
+      "phone must be in E.164 format (for example: +14165551234)"
+    )
+  }
+
+  return normalized
+}
+
+function isValidLatitude(value: number) {
+  return Number.isFinite(value) && value >= -90 && value <= 90
+}
+
+function isValidLongitude(value: number) {
+  return Number.isFinite(value) && value >= -180 && value <= 180
+}
+
+async function upsertLocationIfProvided(
+  userId: string,
+  body: {
+    lat?: number | string
+    lng?: number | string
+    accuracyMeters?: number | string | null
+    recordedAt?: string
+  }
+) {
+  const hasLat = body.lat !== undefined && body.lat !== null
+  const hasLng = body.lng !== undefined && body.lng !== null
+  if (!hasLat && !hasLng) {
+    return
+  }
+  if (!hasLat || !hasLng) {
+    throw new LocationValidationError(
+      "Both lat and lng are required when sending location"
+    )
+  }
+
+  const lat = parseNumber(body.lat)
+  const lng = parseNumber(body.lng)
+  const accuracyMeters =
+    body.accuracyMeters === null
+      ? null
+      : parseNumber(body.accuracyMeters) ?? null
+
+  if (lat == null || lng == null) {
+    throw new LocationValidationError("lat and lng must be numbers")
+  }
+  if (!isValidLatitude(lat) || !isValidLongitude(lng)) {
+    throw new LocationValidationError("lat/lng are out of range")
+  }
+  if (
+    accuracyMeters != null &&
+    (!Number.isFinite(accuracyMeters) || accuracyMeters < 0)
+  ) {
+    throw new LocationValidationError(
+      "accuracyMeters must be a non-negative number"
+    )
+  }
+
+  let recordedAt = new Date()
+  if (body.recordedAt) {
+    const parsedRecordedAt = new Date(body.recordedAt)
+    if (Number.isNaN(parsedRecordedAt.getTime())) {
+      throw new LocationValidationError("recordedAt must be a valid ISO date")
+    }
+    recordedAt = parsedRecordedAt
+  }
+
+  await prisma.userLocation.upsert({
+    where: { userId },
+    create: {
+      userId,
+      lat,
+      lng,
+      accuracyMeters,
+      recordedAt,
+    },
+    update: {
+      lat,
+      lng,
+      accuracyMeters,
+      recordedAt,
+    },
+  })
+}
+
 // Helper for issuing tokens + response shape
+async function resolveRoleDefaultForAuth(user: {
+  id: string
+  roleDefault: "passenger" | "driver"
+}) {
+  if (user.roleDefault === "driver") {
+    return "driver" as const
+  }
+
+  const driverProfile = await prisma.driverProfile.findUnique({
+    where: { userId: user.id },
+    select: { id: true },
+  })
+
+  if (!driverProfile) {
+    return user.roleDefault
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { roleDefault: "driver" },
+  })
+
+  return "driver" as const
+}
+
 async function buildAuthResponse(user: {
   id: string
   name: string
   email: string
+  phone: string | null
+  phoneVerified: boolean
+  emailVerified: boolean
   roleDefault: "passenger" | "driver"
   providerAvatarUrl: string | null
 }) {
+  const resolvedRoleDefault = await resolveRoleDefaultForAuth(user)
+
   const payload = {
     sub: user.id,
-    roleDefault: user.roleDefault,
+    roleDefault: resolvedRoleDefault,
   }
 
   const accessToken = signAccessToken(payload)
@@ -77,7 +282,10 @@ async function buildAuthResponse(user: {
       id: user.id,
       name: user.name,
       email: user.email,
-      roleDefault: user.roleDefault,
+      phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      emailVerified: user.emailVerified,
+      roleDefault: resolvedRoleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
     },
     tokens: {
@@ -99,14 +307,20 @@ function generateEmailOtp() {
  */
 export async function oauthLogin(req: AuthRequest, res: Response) {
   try {
-    console.log(req.body)
-
-    const { provider, providerUserId, email, name, avatarUrl } = (req.body ??
+    const {
+      provider,
+      providerUserId,
+      email,
+      name,
+      avatarUrl,
+      identityToken,
+    } = (req.body ??
       {}) as Partial<OAuthBody>
 
-    if (!provider || !providerUserId || !email || !name) {
+    const normalizedProviderUserId = parseNonEmptyString(providerUserId)
+    if (!provider || !normalizedProviderUserId) {
       return res.status(400).json({
-        error: "provider, providerUserId, email, and name are required",
+        error: "provider and providerUserId are required",
       })
     }
 
@@ -114,44 +328,114 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid provider" })
     }
 
-    // Upsert user by email
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        name,
-        providerAvatarUrl: avatarUrl ?? undefined,
-      },
-      create: {
-        email,
-        name,
-        providerAvatarUrl: avatarUrl ?? undefined,
-        roleDefault: "passenger",
-        emailVerified: true, // for OAuth we can consider them verified
-      },
-    })
+    const normalizedEmail = parseNonEmptyString(email)
+    const normalizedName = parseNonEmptyString(name)
+    const resolvedEmail =
+      normalizedEmail ??
+      (provider === "apple"
+        ? extractAppleEmailFromIdentityToken(identityToken)
+        : null)
 
-    // Upsert OAuth account
-    await prisma.oAuthAccount.upsert({
+    const existingOAuthAccount = await prisma.oAuthAccount.findUnique({
       where: {
         provider_providerUserId: {
           provider,
-          providerUserId,
+          providerUserId: normalizedProviderUserId,
         },
       },
-      update: {
-        providerEmail: email,
-      },
-      create: {
-        provider,
-        providerUserId,
-        providerEmail: email,
-        userId: user.id,
+      include: {
+        user: true,
       },
     })
+
+    let user = existingOAuthAccount?.user ?? null
+
+    if (existingOAuthAccount) {
+      if (!user || user.deletedAt) {
+        return res.status(401).json({ error: "OAuth account is unavailable" })
+      }
+
+      const shouldUpdateUser =
+        (normalizedName != null && normalizedName !== user.name) ||
+        (typeof avatarUrl === "string" &&
+          avatarUrl.trim().length > 0 &&
+          avatarUrl.trim() !== user.providerAvatarUrl)
+
+      if (shouldUpdateUser) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            ...(normalizedName != null ? { name: normalizedName } : {}),
+            ...(typeof avatarUrl === "string" && avatarUrl.trim().length > 0
+              ? { providerAvatarUrl: avatarUrl.trim() }
+              : {}),
+          },
+        })
+      }
+
+      if (resolvedEmail != null && resolvedEmail !== existingOAuthAccount.providerEmail) {
+        await prisma.oAuthAccount.update({
+          where: { id: existingOAuthAccount.id },
+          data: { providerEmail: resolvedEmail },
+        })
+      }
+    } else {
+      if (!resolvedEmail || !normalizedName) {
+        return res.status(400).json({
+          error:
+            provider === "apple"
+              ? "Apple did not return an email address for this sign-in. Remove Help Ride from Sign in with Apple in your Apple ID settings, then try again."
+              : "email and name are required for first-time OAuth sign-in",
+        })
+      }
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: resolvedEmail },
+      })
+
+      user =
+        existingUser != null
+          ? await prisma.user.update({
+              where: { id: existingUser.id },
+              data: {
+                name: normalizedName,
+                ...(typeof avatarUrl === "string" && avatarUrl.trim().length > 0
+                  ? { providerAvatarUrl: avatarUrl.trim() }
+                  : {}),
+                emailVerified: true,
+              },
+            })
+          : await prisma.user.create({
+              data: {
+                email: resolvedEmail,
+                name: normalizedName,
+                providerAvatarUrl:
+                  typeof avatarUrl === "string" && avatarUrl.trim().length > 0
+                    ? avatarUrl.trim()
+                    : undefined,
+                roleDefault: "passenger",
+                emailVerified: true,
+              },
+            })
+
+      await prisma.oAuthAccount.create({
+        data: {
+          provider,
+          providerUserId: normalizedProviderUserId,
+          providerEmail: resolvedEmail,
+          userId: user.id,
+        },
+      })
+    }
+
+    await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<OAuthBody>)
 
     const response = await buildAuthResponse(user)
     return res.status(200).json(response)
   } catch (err) {
+    if (err instanceof LocationValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
     console.error("POST /auth/oauth error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
@@ -163,7 +447,8 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
  */
 export async function registerWithEmail(req: AuthRequest, res: Response) {
   try {
-    const { name, email, password } = (req.body ?? {}) as Partial<RegisterBody>
+    const { name, email, password, phone } = (req.body ??
+      {}) as Partial<RegisterBody>
 
     if (!name || !email || !password) {
       return res
@@ -177,20 +462,60 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         .json({ error: "Password must be at least 8 characters long" })
     }
 
+    const reviewBypass = isAppReviewEmail(email)
+    const requestedPhone =
+      typeof phone === "string" && phone.trim().length > 0
+        ? parsePhoneOrThrow(phone)
+        : null
+
     const existing = await prisma.user.findUnique({
       where: { email },
       include: { oauthAccounts: true },
     })
 
+    const effectivePhone = requestedPhone ?? existing?.phone ?? null
+
+    if (!reviewBypass && !effectivePhone) {
+      return res.status(400).json({
+        error: "phone is required for registration",
+      })
+    }
+
+    if (effectivePhone) {
+      const phoneOwner = await prisma.user.findUnique({
+        where: { phone: effectivePhone },
+        select: { id: true },
+      })
+
+      if (phoneOwner && phoneOwner.id !== existing?.id) {
+        return res.status(409).json({
+          error: "An account with this phone number already exists.",
+        })
+      }
+    }
+
     if (existing && !existing.passwordHash) {
       // Account exists via OAuth, allow them to set a password and use both
       const hash = await bcrypt.hash(password, 10)
+      const samePhone = existing.phone != null && existing.phone === effectivePhone
 
       const updated = await prisma.user.update({
         where: { id: existing.id },
         data: {
           name,
           passwordHash: hash,
+          emailVerified: existing.emailVerified || reviewBypass,
+          ...(effectivePhone != null ? { phone: effectivePhone } : {}),
+          ...(effectivePhone != null
+            ? {
+                phoneVerified:
+                  reviewBypass ||
+                  (samePhone && existing.phoneVerified),
+                phoneVerifyOtp: null,
+                phoneVerifyOtpExpiresAt: null,
+                phoneVerifyOtpAttempts: 0,
+              }
+            : {}),
         },
       })
 
@@ -213,13 +538,20 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         email,
         passwordHash,
         roleDefault: "passenger",
-        emailVerified: false,
+        emailVerified: reviewBypass,
+        ...(effectivePhone != null ? { phone: effectivePhone } : {}),
+        ...(effectivePhone != null
+            ? { phoneVerified: reviewBypass }
+            : {}),
       },
     })
 
     const response = await buildAuthResponse(user)
     return res.status(201).json(response)
   } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
     console.error("POST /auth/register error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
@@ -237,7 +569,7 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "email and password are required" })
     }
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { email },
     })
 
@@ -251,9 +583,21 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Invalid credentials" })
     }
 
+    await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<LoginBody>)
+
+    if (!user.emailVerified && isAppReviewEmail(user.email)) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: true },
+      })
+    }
+
     const response = await buildAuthResponse(user)
     return res.status(200).json(response)
   } catch (err) {
+    if (err instanceof LocationValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
     console.error("POST /auth/login error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
@@ -283,6 +627,9 @@ export async function getMe(req: AuthRequest, res: Response) {
       id: user.id,
       name: user.name,
       email: user.email,
+      phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      emailVerified: user.emailVerified,
       roleDefault: user.roleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
       driverProfile: user.driverProfile,
@@ -333,6 +680,10 @@ export async function refreshTokens(req: AuthRequest, res: Response) {
     })
 
     if (!user) {
+      return res.status(401).json({ error: "Invalid refresh token" })
+    }
+
+    if (user.deletedAt) {
       return res.status(401).json({ error: "Invalid refresh token" })
     }
 
@@ -533,7 +884,7 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       )
       return res.status(400).json({ error: "Invalid email or OTP" })
     }
-    await prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
         emailVerified: true,
@@ -541,12 +892,163 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       },
     })
 
-    const response = await buildAuthResponse(user)
+    const response = await buildAuthResponse(updated)
 
     console.log(response)
     return res.status(200).json(response)
   } catch (err) {
     console.error("POST /auth/verify-email/verify-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/verify-phone/send-otp
+ * Body: { phone }
+ */
+export async function sendPhoneVerifyOtp(req: AuthRequest, res: Response) {
+  try {
+    const { phone } = (req.body ?? {}) as Partial<SendPhoneOtpBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(200).json({
+        message: "If an account exists for this phone, an OTP has been sent.",
+      })
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        phoneVerifyOtp: otp,
+        phoneVerifyOtpExpiresAt: expiresAt,
+        phoneVerifyOtpAttempts: 0,
+      },
+    })
+
+    await sendPhoneVerificationOtpSms({
+      phone: updated.phone ?? normalizedPhone,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Phone verification OTP sent.",
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/verify-phone/send-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/verify-phone/verify-otp
+ * Body: { phone, otp }
+ */
+export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
+  try {
+    const { phone, otp } = (req.body ?? {}) as Partial<VerifyPhoneOtpBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    if (!otp) {
+      return res.status(400).json({ error: "phone and otp are required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    if (
+      !user.phoneVerifyOtp ||
+      !user.phoneVerifyOtpExpiresAt ||
+      user.phoneVerifyOtpExpiresAt < new Date()
+    ) {
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          phoneVerifyOtp: newOtp,
+          phoneVerifyOtpExpiresAt: expiresAt,
+          phoneVerifyOtpAttempts: 0,
+        },
+      })
+
+      let smsSendFailed = false
+      try {
+        await sendPhoneVerificationOtpSms({
+          phone: user.phone ?? normalizedPhone,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (sendErr) {
+        console.error("Failed to resend phone verification OTP", sendErr)
+        smsSendFailed = true
+      }
+
+      if (smsSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
+    }
+
+    if (user.phoneVerifyOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
+    if (user.phoneVerifyOtp !== otp) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          phoneVerifyOtpAttempts: { increment: 1 },
+        },
+      })
+
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        phoneVerified: true,
+        phoneVerifyOtp: null,
+        phoneVerifyOtpExpiresAt: null,
+        phoneVerifyOtpAttempts: 0,
+      },
+    })
+
+    const response = await buildAuthResponse(updated)
+    return res.status(200).json(response)
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/verify-phone/verify-otp error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
@@ -702,6 +1204,173 @@ export async function resetPasswordWithOtp(req: AuthRequest, res: Response) {
     return res.status(200).json({ message: "Password reset successful." })
   } catch (err) {
     console.error("POST /auth/password-reset/verify-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/send-otp-phone
+ * Body: { phone }
+ */
+export async function sendPasswordResetOtpPhone(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    const { phone } = (req.body ?? {}) as Partial<SendPhoneOtpBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(200).json({
+        message: "If an account exists for this phone, an OTP has been sent.",
+      })
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetOtp: otp,
+        passwordResetOtpExpiresAt: expiresAt,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    await sendPasswordResetOtpSms({
+      phone: updated.phone ?? normalizedPhone,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Password reset OTP sent.",
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/password-reset/send-otp-phone error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/password-reset/verify-otp-phone
+ * Body: { phone, otp, newPassword }
+ */
+export async function resetPasswordWithOtpPhone(
+  req: AuthRequest,
+  res: Response
+) {
+  try {
+    const { phone, otp, newPassword } = (req.body ??
+      {}) as Partial<ResetPasswordWithPhoneBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    if (!otp || !newPassword) {
+      return res
+        .status(400)
+        .json({ error: "phone, otp, and newPassword are required" })
+    }
+
+    if (newPassword.length < 8) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 8 characters long" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    if (
+      !user.passwordResetOtp ||
+      !user.passwordResetOtpExpiresAt ||
+      user.passwordResetOtpExpiresAt < new Date()
+    ) {
+      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtp: newOtp,
+          passwordResetOtpExpiresAt: expiresAt,
+          passwordResetOtpAttempts: 0,
+        },
+      })
+
+      let smsSendFailed = false
+      try {
+        await sendPasswordResetOtpSms({
+          phone: user.phone ?? normalizedPhone,
+          name: user.name,
+          otp: newOtp,
+        })
+      } catch (sendErr) {
+        console.error("Failed to resend SMS password reset OTP", sendErr)
+        smsSendFailed = true
+      }
+
+      if (smsSendFailed) {
+        return res.status(400).json({
+          error:
+            "OTP expired or not requested. Failed to send a new OTP, please try again.",
+        })
+      }
+
+      return res.status(400).json({
+        error: "OTP expired or not requested. A new OTP has been sent.",
+      })
+    }
+
+    if (user.passwordResetOtpAttempts >= 5) {
+      return res.status(429).json({
+        error: "Too many attempts. Please request a new OTP.",
+      })
+    }
+
+    if (user.passwordResetOtp !== otp) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetOtpAttempts: { increment: 1 },
+        },
+      })
+
+      return res.status(400).json({ error: "Invalid phone or OTP" })
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordResetOtp: null,
+        passwordResetOtpExpiresAt: null,
+        passwordResetOtpAttempts: 0,
+      },
+    })
+
+    return res.status(200).json({ message: "Password reset successful." })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/password-reset/verify-otp-phone error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }
