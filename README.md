@@ -20,6 +20,17 @@ It powers Flutter clients for passengers and drivers, using PostgreSQL (Neon) + 
 
 ---
 
+## Google Play Review URLs
+
+After deploying the API, use these public pages in Google Play Console:
+
+- `https://your-api-domain/privacy`
+- `https://your-api-domain/account-deletion`
+
+The account deletion page explains both the in-app deletion path and the web/email request path required by Google Play.
+
+---
+
 ## Repository Layout (API)
 
 ```txt

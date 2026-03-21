@@ -3,6 +3,8 @@
 ################################################
 @baseUrl = http://localhost:4000/api
 # @baseUrl = https://dev-help-ride-api.vercel.app/api
+@publicBaseUrl = http://localhost:4000
+# @publicBaseUrl = https://dev-help-ride-api.vercel.app
 
 # App Review note:
 # Sign in with Apple is available on the login screen.
@@ -48,6 +50,19 @@ Accept: text/html
 
 GET {{baseUrl}}/docs/openapi.json
 Accept: application/json
+
+###
+
+################################################
+### 🔒 PUBLIC POLICY PAGES (PLAY CONSOLE)
+################################################
+GET {{publicBaseUrl}}/privacy
+Accept: text/html
+
+###
+
+GET {{publicBaseUrl}}/account-deletion
+Accept: text/html
 
 ###
 
