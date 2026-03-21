@@ -58,6 +58,23 @@ interface PusherAuthBody {
   channel_name?: string
 }
 
+interface ChatBlockState {
+  blockedByMe: boolean
+  blockedByOtherUser: boolean
+  chatDisabled: boolean
+}
+
+interface BlockRelationship {
+  blockerId: string
+  blockedUserId: string
+}
+
+const EMPTY_CHAT_BLOCK_STATE: ChatBlockState = {
+  blockedByMe: false,
+  blockedByOtherUser: false,
+  chatDisabled: false,
+}
+
 function buildPreview(body: string) {
   const trimmed = body.trim()
   if (trimmed.length <= PREVIEW_MAX_LEN) {
@@ -83,7 +100,10 @@ function buildRideReference(rideId: string | null | undefined) {
   return `Ride #${id.slice(0, 8).toUpperCase()}`
 }
 
-function serializeConversation(conversation: any) {
+function serializeConversation(
+  conversation: any,
+  blockState: ChatBlockState = EMPTY_CHAT_BLOCK_STATE
+) {
   const ride = conversation.ride ?? null
   const ridePricePerSeat =
     ride?.pricePerSeat == null ? null : Number(ride.pricePerSeat)
@@ -108,6 +128,91 @@ function serializeConversation(conversation: any) {
     rideStatus: ride?.status ?? null,
     ridePricePerSeat,
     rideStartTime: ride?.startTime ?? null,
+    blockedByMe: blockState.blockedByMe,
+    blockedByOtherUser: blockState.blockedByOtherUser,
+    chatDisabled: blockState.chatDisabled,
+  }
+}
+
+function getOtherParticipantId(
+  conversation: { passengerId: string; driverId: string },
+  currentUserId: string
+) {
+  return conversation.passengerId === currentUserId
+    ? conversation.driverId
+    : conversation.passengerId
+}
+
+function buildChatBlockState(
+  currentUserId: string,
+  otherUserId: string,
+  relationships: BlockRelationship[]
+): ChatBlockState {
+  let blockedByMe = false
+  let blockedByOtherUser = false
+
+  for (const relationship of relationships) {
+    if (
+      relationship.blockerId === currentUserId &&
+      relationship.blockedUserId === otherUserId
+    ) {
+      blockedByMe = true
+    } else if (
+      relationship.blockerId === otherUserId &&
+      relationship.blockedUserId === currentUserId
+    ) {
+      blockedByOtherUser = true
+    }
+  }
+
+  return {
+    blockedByMe,
+    blockedByOtherUser,
+    chatDisabled: blockedByMe || blockedByOtherUser,
+  }
+}
+
+async function getChatBlockState(
+  currentUserId: string,
+  otherUserId: string
+): Promise<ChatBlockState> {
+  if (!currentUserId || !otherUserId || currentUserId === otherUserId) {
+    return EMPTY_CHAT_BLOCK_STATE
+  }
+
+  const relationships = await prisma.blockedUser.findMany({
+    where: {
+      OR: [
+        { blockerId: currentUserId, blockedUserId: otherUserId },
+        { blockerId: otherUserId, blockedUserId: currentUserId },
+      ],
+    },
+    select: {
+      blockerId: true,
+      blockedUserId: true,
+    },
+  })
+
+  return buildChatBlockState(currentUserId, otherUserId, relationships)
+}
+
+function chatBlockedMessage(state: ChatBlockState) {
+  if (state.blockedByMe) {
+    return "You blocked this user. Unblock them to continue chatting."
+  }
+  if (state.blockedByOtherUser) {
+    return "This user is not available for chat."
+  }
+  return "Chat is unavailable."
+}
+
+function chatBlockedErrorResponse(state: ChatBlockState) {
+  return {
+    error: chatBlockedMessage(state),
+    code: "CHAT_BLOCKED",
+    blockedByMe: state.blockedByMe,
+    blockedByOtherUser: state.blockedByOtherUser,
+    chatDisabled: state.chatDisabled,
   }
 }
 
@@ -179,6 +284,9 @@ export async function createConversation(req: AuthRequest, res: Response) {
       })
     }
 
+    const otherUserId = req.userId === driverId ? passengerId : driverId
+    const chatBlockState = await getChatBlockState(req.userId, otherUserId)
+
     const existing = await prisma.conversation.findFirst({
       where: {
         rideId,
@@ -189,7 +297,11 @@ export async function createConversation(req: AuthRequest, res: Response) {
     })
 
     if (existing) {
-      return res.status(200).json(serializeConversation(existing))
+      return res.status(200).json(serializeConversation(existing, chatBlockState))
+    }
+
+    if (chatBlockState.chatDisabled) {
+      return res.status(403).json(chatBlockedErrorResponse(chatBlockState))
     }
 
     const conversation = await prisma.conversation.create({
@@ -201,7 +313,7 @@ export async function createConversation(req: AuthRequest, res: Response) {
       include: conversationInclude,
     })
 
-    return res.status(201).json(serializeConversation(conversation))
+    return res.status(201).json(serializeConversation(conversation, chatBlockState))
   } catch (err) {
     console.error("POST /chat/conversations error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -224,8 +336,28 @@ export async function listConversations(req: AuthRequest, res: Response) {
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
       include: conversationInclude,
     })
+    const relationships = await prisma.blockedUser.findMany({
+      where: {
+        OR: [{ blockerId: req.userId }, { blockedUserId: req.userId }],
+      },
+      select: {
+        blockerId: true,
+        blockedUserId: true,
+      },
+    })
 
-    return res.json(conversations.map(serializeConversation))
+    return res.json(
+      conversations.map((conversation) =>
+        serializeConversation(
+          conversation,
+          buildChatBlockState(
+            req.userId!,
+            getOtherParticipantId(conversation, req.userId!),
+            relationships
+          )
+        )
+      )
+    )
   } catch (err) {
     console.error("GET /chat/conversations error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -313,6 +445,15 @@ export async function sendMessage(req: AuthRequest, res: Response) {
     const participantCheck = await ensureParticipant(conversationId, req.userId)
     if (!participantCheck.ok) {
       return res.status(401).json({ error: participantCheck.error })
+    }
+
+    const otherUserId = getOtherParticipantId(
+      participantCheck.conversation,
+      req.userId
+    )
+    const chatBlockState = await getChatBlockState(req.userId, otherUserId)
+    if (chatBlockState.chatDisabled) {
+      return res.status(403).json(chatBlockedErrorResponse(chatBlockState))
     }
 
     const now = new Date()
@@ -560,6 +701,87 @@ export async function pusherAuth(req: AuthRequest, res: Response) {
     return res.send(authResponse)
   } catch (err) {
     console.error("POST /chat/pusher/auth error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+export async function blockChatUser(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const blockedUserId = req.params.userId?.trim()
+    if (!blockedUserId) {
+      return res.status(400).json({ error: "user id is required" })
+    }
+
+    if (blockedUserId === req.userId) {
+      return res.status(400).json({ error: "You cannot block yourself" })
+    }
+
+    const targetUser = await prisma.user.findFirst({
+      where: {
+        id: blockedUserId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    })
+
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    await prisma.blockedUser.upsert({
+      where: {
+        blockerId_blockedUserId: {
+          blockerId: req.userId,
+          blockedUserId,
+        },
+      },
+      create: {
+        blockerId: req.userId,
+        blockedUserId,
+      },
+      update: {},
+    })
+
+    const state = await getChatBlockState(req.userId, blockedUserId)
+    return res.json({
+      blockedUserId,
+      ...state,
+    })
+  } catch (err) {
+    console.error("POST /chat/users/:userId/block error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+export async function unblockChatUser(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const blockedUserId = req.params.userId?.trim()
+    if (!blockedUserId) {
+      return res.status(400).json({ error: "user id is required" })
+    }
+
+    await prisma.blockedUser.deleteMany({
+      where: {
+        blockerId: req.userId,
+        blockedUserId,
+      },
+    })
+
+    const state = await getChatBlockState(req.userId, blockedUserId)
+    return res.json({
+      blockedUserId,
+      ...state,
+    })
+  } catch (err) {
+    console.error("DELETE /chat/users/:userId/block error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

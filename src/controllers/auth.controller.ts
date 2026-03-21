@@ -62,6 +62,10 @@ interface SendPhoneOtpBody {
   phone: string
 }
 
+interface SendEmailOtpBody {
+  email: string
+}
+
 interface VerifyPhoneOtpBody {
   phone: string
   otp: string
@@ -77,6 +81,18 @@ const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 class LocationValidationError extends Error {}
 class PhoneValidationError extends Error {}
+
+function buildMissingAccountResponse(identifierType: "email" | "phone") {
+  return {
+    error:
+      identifierType === "email"
+        ? "No account found for this email. Create one to continue."
+        : "No account found for this phone number. Create one to continue.",
+    code: "ACCOUNT_NOT_FOUND",
+    identifierType,
+    nextStep: "register",
+  }
+}
 
 function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex")
@@ -564,18 +580,27 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
 export async function loginWithEmail(req: AuthRequest, res: Response) {
   try {
     const { email, password } = (req.body ?? {}) as Partial<LoginBody>
+    const normalizedEmail = parseNonEmptyString(email)
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       return res.status(400).json({ error: "email and password are required" })
     }
 
     let user = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
     })
 
-    if (!user || !user.passwordHash) {
-      // Either no user or only OAuth account with no password
-      return res.status(401).json({ error: "Invalid credentials" })
+    if (!user) {
+      return res.status(404).json(buildMissingAccountResponse("email"))
+    }
+
+    if (!user.passwordHash) {
+      return res.status(409).json({
+        error:
+          "This account does not have a password yet. Use a one-time code or continue with Apple or Google.",
+        code: "PASSWORD_LOGIN_UNAVAILABLE",
+        nextStep: "otp_or_oauth",
+      })
     }
 
     const isValid = await bcrypt.compare(password, user.passwordHash)
@@ -599,6 +624,102 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: err.message })
     }
     console.error("POST /auth/login error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/login-email/send-otp
+ * Body: { email }
+ */
+export async function sendLoginEmailOtp(req: AuthRequest, res: Response) {
+  try {
+    const { email } = (req.body ?? {}) as Partial<SendEmailOtpBody>
+    const normalizedEmail = parseNonEmptyString(email)
+
+    if (!normalizedEmail) {
+      return res.status(400).json({ error: "email is required" })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    })
+
+    if (!user) {
+      return res.status(404).json(buildMissingAccountResponse("email"))
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerifyOtp: otp,
+        emailVerifyOtpExpiresAt: expiresAt,
+        emailVerifyOtpAttempts: 0,
+      },
+    })
+
+    await sendEmailVerificationOtp({
+      email: updated.email,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Sign-in OTP sent.",
+    })
+  } catch (err) {
+    console.error("POST /auth/login-email/send-otp error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/login-phone/send-otp
+ * Body: { phone }
+ */
+export async function sendLoginPhoneOtp(req: AuthRequest, res: Response) {
+  try {
+    const { phone } = (req.body ?? {}) as Partial<SendPhoneOtpBody>
+    const normalizedPhone = parsePhoneOrThrow(phone)
+
+    const user = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (!user) {
+      return res.status(404).json(buildMissingAccountResponse("phone"))
+    }
+
+    const { otp, expiresAt } = generateEmailOtp()
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        phoneVerifyOtp: otp,
+        phoneVerifyOtpExpiresAt: expiresAt,
+        phoneVerifyOtpAttempts: 0,
+      },
+    })
+
+    await sendPhoneVerificationOtpSms({
+      phone: updated.phone ?? normalizedPhone,
+      name: updated.name,
+      otp,
+    })
+
+    return res.status(200).json({
+      message: "Sign-in OTP sent.",
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/login-phone/send-otp error", err)
     return res.status(500).json({ error: "Internal server error" })
   }
 }

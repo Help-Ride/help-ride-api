@@ -1,12 +1,14 @@
 import { Router } from "express"
 import { authGuard } from "../middleware/auth.js"
 import {
+  blockChatUser,
   createConversation,
   listConversations,
   listMessages,
   sendMessage,
   markConversationMessagesRead,
   pusherAuth,
+  unblockChatUser,
 } from "../controllers/chat.controller.js"
 
 const router = Router()
@@ -16,6 +18,8 @@ router.get("/conversations", authGuard, listConversations)
 router.get("/conversations/:id/messages", authGuard, listMessages)
 router.post("/conversations/:id/messages", authGuard, sendMessage)
 router.post("/conversations/:id/read", authGuard, markConversationMessagesRead)
+router.post("/users/:userId/block", authGuard, blockChatUser)
+router.delete("/users/:userId/block", authGuard, unblockChatUser)
 router.post("/pusher/auth", authGuard, pusherAuth)
 
 export default router

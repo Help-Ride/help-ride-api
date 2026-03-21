@@ -145,6 +145,8 @@ model User {
   deviceTokens           DeviceToken[]
   supportTickets         SupportTicket[]
   userLocation           UserLocation?
+  blockedUsers           BlockedUser[]     @relation("BlockingUser")
+  blockedByUsers         BlockedUser[]     @relation("BlockedUser")
 }
 
 model OAuthAccount {
@@ -362,6 +364,17 @@ model Message {
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+model BlockedUser {
+  blocker       User     @relation("BlockingUser", fields: [blockerId], references: [id])
+  blockerId     String
+  blockedUser   User     @relation("BlockedUser", fields: [blockedUserId], references: [id])
+  blockedUserId String
+  createdAt     DateTime @default(now())
+
+  @@id([blockerId, blockedUserId])
+  @@index([blockedUserId])
 }
 
 enum RideRequestStatus {

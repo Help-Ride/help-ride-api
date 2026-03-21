@@ -4,6 +4,8 @@ import {
   oauthLogin,
   registerWithEmail,
   loginWithEmail,
+  sendLoginEmailOtp,
+  sendLoginPhoneOtp,
   getMe,
   sendEmailVerifyOtp,
   verifyEmailWithOtp,
@@ -23,6 +25,8 @@ router.post("/oauth", oauthLogin)
 
 router.post("/register", registerWithEmail)
 router.post("/login", loginWithEmail)
+router.post("/login-email/send-otp", sendLoginEmailOtp)
+router.post("/login-phone/send-otp", sendLoginPhoneOtp)
 router.post("/refresh", refreshTokens)
 router.post("/logout", logout)
 
