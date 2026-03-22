@@ -2013,6 +2013,8 @@ Response:
 
 `POST /chat/conversations`
 
+Requires the ride booking for that passenger to be paid before chat unlocks for either passenger or driver. If payment is still pending or unpaid, the endpoint returns `403` with code `CHAT_PAYMENT_REQUIRED`.
+
 ```json
 {
   "rideId": "ride-uuid",
@@ -2031,6 +2033,8 @@ Response:
   "tripTime": "Mar 5, 9:30 PM",
   "rideStatus": "open",
   "ridePricePerSeat": 15,
+  "paymentRequired": false,
+  "chatDisabled": false,
   "passengerId": "passenger-uuid",
   "driverId": "driver-uuid",
   "lastMessageAt": null,
@@ -2080,6 +2084,8 @@ Response:
     "tripTime": "Mar 5, 9:30 PM",
     "rideStatus": "open",
     "ridePricePerSeat": 15,
+    "paymentRequired": false,
+    "chatDisabled": false,
     "passengerId": "passenger-uuid",
     "driverId": "driver-uuid",
     "lastMessageAt": "2025-01-01T02:00:00.000Z",
@@ -2117,6 +2123,8 @@ Response:
 ### List Messages
 
 `GET /chat/conversations/{conversationId}/messages?limit=50&cursor=...`
+
+Returns `403` with code `CHAT_PAYMENT_REQUIRED` until payment is completed for the booking tied to that conversation.
 
 Response:
 
@@ -2163,6 +2171,8 @@ Response:
 ### Send Message
 
 `POST /chat/conversations/{conversationId}/messages`
+
+Returns `403` with code `CHAT_PAYMENT_REQUIRED` until payment is completed for the booking tied to that conversation.
 
 ```json
 {

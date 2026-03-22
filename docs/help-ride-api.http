@@ -706,6 +706,8 @@ Accept: application/json
 ################################################
 
 ### CREATE / GET CONVERSATION (PASSENGER)
+# Requires a paid/succeeded booking for this ride + passenger pair.
+# Otherwise returns 403 with code CHAT_PAYMENT_REQUIRED.
 POST {{baseUrl}}/chat/conversations
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -717,6 +719,8 @@ Content-Type: application/json
 ###
 
 ### CREATE / GET CONVERSATION (DRIVER)
+# Requires a paid/succeeded booking for this ride + passenger pair.
+# Otherwise returns 403 with code CHAT_PAYMENT_REQUIRED.
 POST {{baseUrl}}/chat/conversations
 Authorization: Bearer {{driverAccessToken}}
 Content-Type: application/json
@@ -739,7 +743,7 @@ Accept: application/json
 # - tripTime / tripTimeLabel
 # - rideStatus
 # - ridePricePerSeat
-# - blockedByMe / blockedByOtherUser / chatDisabled
+# - blockedByMe / blockedByOtherUser / paymentRequired / chatDisabled
 # - nested ride object
 
 ###

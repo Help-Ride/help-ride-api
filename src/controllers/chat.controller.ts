@@ -64,6 +64,10 @@ interface ChatBlockState {
   chatDisabled: boolean
 }
 
+interface ChatAccessState extends ChatBlockState {
+  paymentRequired: boolean
+}
+
 interface BlockRelationship {
   blockerId: string
   blockedUserId: string
@@ -74,6 +78,13 @@ const EMPTY_CHAT_BLOCK_STATE: ChatBlockState = {
   blockedByOtherUser: false,
   chatDisabled: false,
 }
+
+const EMPTY_CHAT_ACCESS_STATE: ChatAccessState = {
+  ...EMPTY_CHAT_BLOCK_STATE,
+  paymentRequired: false,
+}
+
+const CHAT_UNLOCKED_PAYMENT_STATUSES = ["paid", "succeeded"] as const
 
 function buildPreview(body: string) {
   const trimmed = body.trim()
@@ -102,7 +113,7 @@ function buildRideReference(rideId: string | null | undefined) {
 
 function serializeConversation(
   conversation: any,
-  blockState: ChatBlockState = EMPTY_CHAT_BLOCK_STATE
+  accessState: ChatAccessState = EMPTY_CHAT_ACCESS_STATE
 ) {
   const ride = conversation.ride ?? null
   const ridePricePerSeat =
@@ -128,9 +139,10 @@ function serializeConversation(
     rideStatus: ride?.status ?? null,
     ridePricePerSeat,
     rideStartTime: ride?.startTime ?? null,
-    blockedByMe: blockState.blockedByMe,
-    blockedByOtherUser: blockState.blockedByOtherUser,
-    chatDisabled: blockState.chatDisabled,
+    blockedByMe: accessState.blockedByMe,
+    blockedByOtherUser: accessState.blockedByOtherUser,
+    paymentRequired: accessState.paymentRequired,
+    chatDisabled: accessState.chatDisabled,
   }
 }
 
@@ -170,6 +182,112 @@ function buildChatBlockState(
     blockedByOtherUser,
     chatDisabled: blockedByMe || blockedByOtherUser,
   }
+}
+
+function buildChatAccessState(
+  blockState: ChatBlockState,
+  paymentRequired: boolean
+): ChatAccessState {
+  return {
+    ...blockState,
+    paymentRequired,
+    chatDisabled: blockState.chatDisabled || paymentRequired,
+  }
+}
+
+function conversationPaymentKey(
+  rideId: string | null | undefined,
+  passengerId: string | null | undefined
+) {
+  const normalizedRideId = rideId?.trim() ?? ""
+  const normalizedPassengerId = passengerId?.trim() ?? ""
+  if (!normalizedRideId || !normalizedPassengerId) {
+    return null
+  }
+  return `${normalizedRideId}:${normalizedPassengerId}`
+}
+
+function chatPaymentRequiredMessage() {
+  return "Chat unlocks after payment is completed for this booking."
+}
+
+function chatPaymentRequiredErrorResponse(
+  accessState: ChatAccessState = EMPTY_CHAT_ACCESS_STATE
+) {
+  return {
+    error: chatPaymentRequiredMessage(),
+    code: "CHAT_PAYMENT_REQUIRED",
+    blockedByMe: accessState.blockedByMe,
+    blockedByOtherUser: accessState.blockedByOtherUser,
+    paymentRequired: true,
+    chatDisabled: true,
+  }
+}
+
+async function hasConversationPaymentAccess(params: {
+  rideId: string | null | undefined
+  passengerId: string
+}) {
+  const key = conversationPaymentKey(params.rideId, params.passengerId)
+  if (!key) {
+    return true
+  }
+
+  const booking = await prisma.booking.findFirst({
+    where: {
+      rideId: params.rideId!.trim(),
+      passengerId: params.passengerId,
+      paymentStatus: {
+        in: [...CHAT_UNLOCKED_PAYMENT_STATUSES],
+      },
+    },
+    select: { id: true },
+  })
+
+  return booking != null
+}
+
+async function listPaidConversationKeys(
+  conversations: Array<{ rideId: string | null; passengerId: string }>
+) {
+  const rideIds = Array.from(
+    new Set(
+      conversations
+        .map((conversation) => conversation.rideId?.trim() ?? "")
+        .filter((value) => value.length > 0)
+    )
+  )
+  const passengerIds = Array.from(
+    new Set(
+      conversations
+        .map((conversation) => conversation.passengerId.trim())
+        .filter((value) => value.length > 0)
+    )
+  )
+
+  if (rideIds.length === 0 || passengerIds.length === 0) {
+    return new Set<string>()
+  }
+
+  const paidBookings = await prisma.booking.findMany({
+    where: {
+      rideId: { in: rideIds },
+      passengerId: { in: passengerIds },
+      paymentStatus: {
+        in: [...CHAT_UNLOCKED_PAYMENT_STATUSES],
+      },
+    },
+    select: {
+      rideId: true,
+      passengerId: true,
+    },
+  })
+
+  return new Set(
+    paidBookings
+      .map((booking) => conversationPaymentKey(booking.rideId, booking.passengerId))
+      .filter((value): value is string => value != null)
+  )
 }
 
 async function getChatBlockState(
@@ -221,6 +339,7 @@ async function ensureParticipant(conversationId: string, userId: string) {
     where: { id: conversationId },
     select: {
       id: true,
+      rideId: true,
       passengerId: true,
       driverId: true,
     },
@@ -286,6 +405,14 @@ export async function createConversation(req: AuthRequest, res: Response) {
 
     const otherUserId = req.userId === driverId ? passengerId : driverId
     const chatBlockState = await getChatBlockState(req.userId, otherUserId)
+    const paymentRequired = !(await hasConversationPaymentAccess({
+      rideId,
+      passengerId,
+    }))
+    const chatAccessState = buildChatAccessState(
+      chatBlockState,
+      paymentRequired
+    )
 
     const existing = await prisma.conversation.findFirst({
       where: {
@@ -297,7 +424,14 @@ export async function createConversation(req: AuthRequest, res: Response) {
     })
 
     if (existing) {
-      return res.status(200).json(serializeConversation(existing, chatBlockState))
+      if (chatAccessState.paymentRequired) {
+        return res.status(403).json(chatPaymentRequiredErrorResponse(chatAccessState))
+      }
+      return res.status(200).json(serializeConversation(existing, chatAccessState))
+    }
+
+    if (chatAccessState.paymentRequired) {
+      return res.status(403).json(chatPaymentRequiredErrorResponse(chatAccessState))
     }
 
     if (chatBlockState.chatDisabled) {
@@ -313,7 +447,7 @@ export async function createConversation(req: AuthRequest, res: Response) {
       include: conversationInclude,
     })
 
-    return res.status(201).json(serializeConversation(conversation, chatBlockState))
+    return res.status(201).json(serializeConversation(conversation, chatAccessState))
   } catch (err) {
     console.error("POST /chat/conversations error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -345,15 +479,30 @@ export async function listConversations(req: AuthRequest, res: Response) {
         blockedUserId: true,
       },
     })
+    const paidConversationKeys = await listPaidConversationKeys(
+      conversations.map((conversation) => ({
+        rideId: conversation.rideId,
+        passengerId: conversation.passengerId,
+      }))
+    )
 
     return res.json(
       conversations.map((conversation) =>
         serializeConversation(
           conversation,
-          buildChatBlockState(
-            req.userId!,
-            getOtherParticipantId(conversation, req.userId!),
-            relationships
+          buildChatAccessState(
+            buildChatBlockState(
+              req.userId!,
+              getOtherParticipantId(conversation, req.userId!),
+              relationships
+            ),
+            (() => {
+              const key = conversationPaymentKey(
+                conversation.rideId,
+                conversation.passengerId
+              )
+              return key == null ? false : !paidConversationKeys.has(key)
+            })()
           )
         )
       )
@@ -381,6 +530,14 @@ export async function listMessages(req: AuthRequest, res: Response) {
     const participantCheck = await ensureParticipant(conversationId, req.userId)
     if (!participantCheck.ok) {
       return res.status(401).json({ error: participantCheck.error })
+    }
+
+    const paymentAllowed = await hasConversationPaymentAccess({
+      rideId: participantCheck.conversation.rideId,
+      passengerId: participantCheck.conversation.passengerId,
+    })
+    if (!paymentAllowed) {
+      return res.status(403).json(chatPaymentRequiredErrorResponse())
     }
 
     const limit = Math.min(
@@ -445,6 +602,14 @@ export async function sendMessage(req: AuthRequest, res: Response) {
     const participantCheck = await ensureParticipant(conversationId, req.userId)
     if (!participantCheck.ok) {
       return res.status(401).json({ error: participantCheck.error })
+    }
+
+    const paymentAllowed = await hasConversationPaymentAccess({
+      rideId: participantCheck.conversation.rideId,
+      passengerId: participantCheck.conversation.passengerId,
+    })
+    if (!paymentAllowed) {
+      return res.status(403).json(chatPaymentRequiredErrorResponse())
     }
 
     const otherUserId = getOtherParticipantId(
@@ -608,6 +773,14 @@ export async function markConversationMessagesRead(
       return res.status(401).json({ error: participantCheck.error })
     }
 
+    const paymentAllowed = await hasConversationPaymentAccess({
+      rideId: participantCheck.conversation.rideId,
+      passengerId: participantCheck.conversation.passengerId,
+    })
+    if (!paymentAllowed) {
+      return res.status(403).json(chatPaymentRequiredErrorResponse())
+    }
+
     const unreadMessages = await prisma.message.findMany({
       where: {
         conversationId,
@@ -687,6 +860,13 @@ export async function pusherAuth(req: AuthRequest, res: Response) {
       const participantCheck = await ensureParticipant(conversationId, req.userId)
       if (!participantCheck.ok) {
         return res.status(403).json({ error: "Unauthorized" })
+      }
+      const paymentAllowed = await hasConversationPaymentAccess({
+        rideId: participantCheck.conversation.rideId,
+        passengerId: participantCheck.conversation.passengerId,
+      })
+      if (!paymentAllowed) {
+        return res.status(403).json(chatPaymentRequiredErrorResponse())
       }
     } else if (channel_name.startsWith(userPrefix)) {
       const channelUserId = channel_name.slice(userPrefix.length)
