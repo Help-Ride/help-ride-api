@@ -23,6 +23,18 @@ enum AuthProvider {
   apple
 }
 
+enum AccountStatus {
+  active
+  locked
+  suspended
+  deleted
+}
+
+enum AuthChallengeChannel {
+  phone
+  email
+}
+
 enum RideStatus {
   open
   ongoing
@@ -105,13 +117,20 @@ model DriverDocument {
 model User {
   id                        String           @id @default(uuid())
   name                      String
-  email                     String           @unique
+  email                     String?          @unique
   phone                     String?          @unique
   passwordHash              String?
   roleDefault               RoleDefault      @default(passenger)
   providerAvatarUrl         String?
   emailVerified             Boolean          @default(false)
   phoneVerified             Boolean          @default(false)
+  emailVerifiedAt           DateTime?
+  phoneVerifiedAt           DateTime?
+  appleProviderId           String?          @unique
+  googleProviderId          String?          @unique
+  authMethods               String[]         @default([])
+  lastLoginAt               DateTime?
+  accountStatus             AccountStatus    @default(active)
   stripeAccountId           String?          @unique
   deletedAt                 DateTime?
 
@@ -129,6 +148,7 @@ model User {
   updatedAt                 DateTime         @updatedAt
 
   oauthAccounts        OAuthAccount[]
+  authChallenges       AuthChallenge[]
   driverProfile        DriverProfile?
   rides                Ride[]           @relation("DriverRides")
   bookings             Booking[]        @relation("PassengerBookings")
@@ -147,6 +167,32 @@ model User {
   userLocation           UserLocation?
   blockedUsers           BlockedUser[]     @relation("BlockingUser")
   blockedByUsers         BlockedUser[]     @relation("BlockedUser")
+}
+
+model AuthChallenge {
+  id                 String               @id @default(uuid())
+  channel            AuthChallengeChannel
+  identifier         String
+  user               User?                @relation(fields: [userId], references: [id])
+  userId             String?
+  otp                String
+  expiresAt          DateTime
+  resendAvailableAt  DateTime
+  verifyAttempts     Int                  @default(0)
+  sendCount          Int                  @default(1)
+  lockedUntil        DateTime?
+  requestedFromIp    String?
+  requestedFromDevice String?
+  verifiedAt         DateTime?
+  consumedAt         DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([identifier])
+  @@index([channel, identifier, createdAt])
+  @@index([requestedFromIp, createdAt])
+  @@index([requestedFromDevice, createdAt])
+  @@index([expiresAt])
 }
 
 model OAuthAccount {

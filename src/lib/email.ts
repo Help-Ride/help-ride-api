@@ -33,6 +33,29 @@ export async function sendEmailVerificationOtp(params: {
   })
 }
 
+export async function sendAuthOtpEmail(params: {
+  email: string
+  name?: string | null
+  otp: string
+}) {
+  const { email, name, otp } = params
+
+  const html = `
+    <p>Hi ${name || "there"},</p>
+    <p>Your ${APP_NAME} sign-in code is:</p>
+    <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${otp}</p>
+    <p>This code will expire in 5 minutes.</p>
+    <p>If you didn’t request it, you can ignore this email.</p>
+  `
+
+  await resend.emails.send({
+    from: EMAIL_FROM,
+    to: email,
+    subject: `Your ${APP_NAME} sign-in code`,
+    html,
+  })
+}
+
 export async function sendPasswordResetOtp(params: {
   email: string
   name: string

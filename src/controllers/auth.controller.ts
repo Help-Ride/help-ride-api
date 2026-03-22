@@ -5,13 +5,20 @@ import crypto from "crypto"
 import prisma from "../lib/prisma.js"
 import {
   signAccessToken,
+  signOnboardingToken,
   signRefreshToken,
+  verifyOnboardingToken,
   verifyRefreshToken,
 } from "../lib/jwt.js"
 import { isAppReviewEmail } from "../lib/appReview.js"
 import { AuthRequest } from "../middleware/auth.js"
-import { sendEmailVerificationOtp, sendPasswordResetOtp } from "../lib/email.js"
 import {
+  sendAuthOtpEmail,
+  sendEmailVerificationOtp,
+  sendPasswordResetOtp,
+} from "../lib/email.js"
+import {
+  sendAuthOtpSms,
   isValidE164Phone,
   normalizePhoneNumber,
   sendPasswordResetOtpSms,
@@ -66,9 +73,31 @@ interface SendEmailOtpBody {
   email: string
 }
 
+interface ContinueAuthBody {
+  phone?: string
+  email?: string
+  deviceId?: string
+}
+
 interface VerifyPhoneOtpBody {
   phone: string
   otp: string
+}
+
+interface VerifyContinueAuthBody {
+  phone?: string
+  email?: string
+  otp?: string
+  deviceId?: string
+}
+
+interface CompleteOnboardingBody {
+  onboardingToken: string
+  firstName: string
+  lastName: string
+  email?: string
+  phone?: string
+  deviceId?: string
 }
 
 interface ResetPasswordWithPhoneBody {
@@ -78,6 +107,14 @@ interface ResetPasswordWithPhoneBody {
 }
 
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const AUTH_OTP_TTL_MS = 5 * 60 * 1000
+const AUTH_OTP_RESEND_COOLDOWN_MS = 30 * 1000
+const AUTH_OTP_MAX_VERIFY_ATTEMPTS = 5
+const AUTH_OTP_LOCKOUT_MS = 15 * 60 * 1000
+const AUTH_OTP_MAX_SENDS_PER_IDENTIFIER_WINDOW = 5
+const AUTH_OTP_MAX_SENDS_PER_IP_WINDOW = 12
+const AUTH_OTP_MAX_SENDS_PER_DEVICE_WINDOW = 8
+const AUTH_OTP_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000
 
 class LocationValidationError extends Error {}
 class PhoneValidationError extends Error {}
@@ -92,6 +129,64 @@ function buildMissingAccountResponse(identifierType: "email" | "phone") {
     identifierType,
     nextStep: "register",
   }
+}
+
+function buildAuthError(
+  error: string,
+  code: string,
+  extra: Record<string, unknown> = {}
+) {
+  return {
+    error,
+    code,
+    ...extra,
+  }
+}
+
+function normalizeEmail(value: unknown) {
+  const parsed = parseNonEmptyString(value)
+  return parsed?.toLowerCase() ?? null
+}
+
+function mergeAuthMethods(existing: string[] | null | undefined, ...next: Array<string | null | undefined>) {
+  const set = new Set<string>()
+  for (const value of existing ?? []) {
+    const parsed = parseNonEmptyString(value)
+    if (parsed) {
+      set.add(parsed)
+    }
+  }
+  for (const value of next) {
+    const parsed = parseNonEmptyString(value)
+    if (parsed) {
+      set.add(parsed)
+    }
+  }
+  return Array.from(set)
+}
+
+function getRequestedIp(req: AuthRequest) {
+  const forwarded = req.headers["x-forwarded-for"]
+  if (typeof forwarded === "string" && forwarded.trim().length > 0) {
+    return forwarded.split(",")[0]?.trim() ?? req.ip ?? null
+  }
+  return req.ip ?? null
+}
+
+function getRequestedDeviceId(body: Record<string, unknown> | null | undefined) {
+  return parseNonEmptyString(body?.deviceId)
+}
+
+function isAccountActive(accountStatus: string | null | undefined) {
+  return !accountStatus || accountStatus === "active"
+}
+
+function splitNameParts(firstName: string, lastName: string) {
+  return `${firstName.trim()} ${lastName.trim()}`.trim()
+}
+
+function authMethodForChannel(channel: "phone" | "email") {
+  return channel === "phone" ? "phone_otp" : "email_otp"
 }
 
 function hashToken(token: string) {
@@ -266,12 +361,19 @@ async function resolveRoleDefaultForAuth(user: {
 async function buildAuthResponse(user: {
   id: string
   name: string
-  email: string
+  email: string | null
   phone: string | null
   phoneVerified: boolean
   emailVerified: boolean
+  phoneVerifiedAt?: Date | null
+  emailVerifiedAt?: Date | null
   roleDefault: "passenger" | "driver"
   providerAvatarUrl: string | null
+  authMethods?: string[]
+  accountStatus?: string
+  lastLoginAt?: Date | null
+  appleProviderId?: string | null
+  googleProviderId?: string | null
 }) {
   const resolvedRoleDefault = await resolveRoleDefaultForAuth(user)
 
@@ -301,6 +403,13 @@ async function buildAuthResponse(user: {
       phone: user.phone,
       phoneVerified: user.phoneVerified,
       emailVerified: user.emailVerified,
+      phoneVerifiedAt: user.phoneVerifiedAt ?? null,
+      emailVerifiedAt: user.emailVerifiedAt ?? null,
+      authMethods: user.authMethods ?? [],
+      accountStatus: user.accountStatus ?? "active",
+      lastLoginAt: user.lastLoginAt ?? null,
+      appleProviderId: user.appleProviderId ?? null,
+      googleProviderId: user.googleProviderId ?? null,
       roleDefault: resolvedRoleDefault,
       providerAvatarUrl: user.providerAvatarUrl,
     },
@@ -311,11 +420,294 @@ async function buildAuthResponse(user: {
   }
 }
 
+async function loadAuthUserById(userId: string) {
+  return prisma.user.findUnique({
+    where: { id: userId },
+  })
+}
+
+async function markSuccessfulAuth(
+  userId: string,
+  method: string,
+  updates: Record<string, unknown> = {}
+) {
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { authMethods: true },
+  })
+
+  if (!existing) {
+    return null
+  }
+
+  return prisma.user.update({
+    where: { id: userId },
+    data: {
+      lastLoginAt: new Date(),
+      authMethods: mergeAuthMethods(existing.authMethods, method),
+      ...updates,
+    },
+  })
+}
+
 function generateEmailOtp() {
   // 6-digit numeric OTP
   const otp = Math.floor(100000 + Math.random() * 900000).toString()
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
   return { otp, expiresAt }
+}
+
+function generateAuthOtp() {
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const now = Date.now()
+  return {
+    otp,
+    expiresAt: new Date(now + AUTH_OTP_TTL_MS),
+    resendAvailableAt: new Date(now + AUTH_OTP_RESEND_COOLDOWN_MS),
+  }
+}
+
+async function findLatestAuthChallenge(channel: "phone" | "email", identifier: string) {
+  return prisma.authChallenge.findFirst({
+    where: {
+      channel,
+      identifier,
+      consumedAt: null,
+    },
+    orderBy: { createdAt: "desc" },
+  })
+}
+
+async function checkAuthChallengeRateLimits(params: {
+  channel: "phone" | "email"
+  identifier: string
+  requestedFromIp: string | null
+  requestedFromDevice: string | null
+}) {
+  const windowStart = new Date(Date.now() - AUTH_OTP_RATE_LIMIT_WINDOW_MS)
+
+  const identifierRequests = await prisma.authChallenge.count({
+    where: {
+      channel: params.channel,
+      identifier: params.identifier,
+      createdAt: { gte: windowStart },
+    },
+  })
+
+  if (identifierRequests >= AUTH_OTP_MAX_SENDS_PER_IDENTIFIER_WINDOW) {
+    return {
+      status: 429,
+      body: buildAuthError(
+        "Too many codes requested. Try again later.",
+        "OTP_RATE_LIMITED",
+        { retryAfterSeconds: Math.floor(AUTH_OTP_LOCKOUT_MS / 1000) }
+      ),
+    }
+  }
+
+  if (params.requestedFromIp) {
+    const ipRequests = await prisma.authChallenge.count({
+      where: {
+        requestedFromIp: params.requestedFromIp,
+        createdAt: { gte: windowStart },
+      },
+    })
+    if (ipRequests >= AUTH_OTP_MAX_SENDS_PER_IP_WINDOW) {
+      return {
+        status: 429,
+        body: buildAuthError(
+          "Too many requests from this network. Try again later.",
+          "OTP_IP_RATE_LIMITED",
+          { retryAfterSeconds: Math.floor(AUTH_OTP_LOCKOUT_MS / 1000) }
+        ),
+      }
+    }
+  }
+
+  if (params.requestedFromDevice) {
+    const deviceRequests = await prisma.authChallenge.count({
+      where: {
+        requestedFromDevice: params.requestedFromDevice,
+        createdAt: { gte: windowStart },
+      },
+    })
+    if (deviceRequests >= AUTH_OTP_MAX_SENDS_PER_DEVICE_WINDOW) {
+      return {
+        status: 429,
+        body: buildAuthError(
+          "Too many codes requested from this device. Try again later.",
+          "OTP_DEVICE_RATE_LIMITED",
+          { retryAfterSeconds: Math.floor(AUTH_OTP_LOCKOUT_MS / 1000) }
+        ),
+      }
+    }
+  }
+
+  return null
+}
+
+async function createAuthChallenge(params: {
+  channel: "phone" | "email"
+  identifier: string
+  requestedFromIp: string | null
+  requestedFromDevice: string | null
+  userId?: string | null
+}) {
+  const latest = await findLatestAuthChallenge(params.channel, params.identifier)
+  if (latest?.lockedUntil && latest.lockedUntil > new Date()) {
+    return {
+      error: {
+        status: 429,
+        body: buildAuthError(
+          "Too many failed attempts. Try again later.",
+          "OTP_TEMPORARILY_LOCKED",
+          {
+            retryAfterSeconds: Math.max(
+              1,
+              Math.ceil((latest.lockedUntil.getTime() - Date.now()) / 1000)
+            ),
+          }
+        ),
+      },
+    }
+  }
+
+  if (latest?.resendAvailableAt && latest.resendAvailableAt > new Date()) {
+    return {
+      error: {
+        status: 429,
+        body: buildAuthError(
+          "Please wait before requesting another code.",
+          "OTP_RESEND_THROTTLED",
+          {
+            retryAfterSeconds: Math.max(
+              1,
+              Math.ceil((latest.resendAvailableAt.getTime() - Date.now()) / 1000)
+            ),
+          }
+        ),
+      },
+    }
+  }
+
+  const rateLimit = await checkAuthChallengeRateLimits(params)
+  if (rateLimit) {
+    return { error: rateLimit }
+  }
+
+  const generated = generateAuthOtp()
+  const challenge = await prisma.authChallenge.create({
+    data: {
+      channel: params.channel,
+      identifier: params.identifier,
+      userId: params.userId ?? null,
+      otp: hashToken(generated.otp),
+      expiresAt: generated.expiresAt,
+      resendAvailableAt: generated.resendAvailableAt,
+      requestedFromIp: params.requestedFromIp,
+      requestedFromDevice: params.requestedFromDevice,
+    },
+  })
+
+  return { challenge, otp: generated.otp }
+}
+
+async function verifyAuthChallenge(params: {
+  channel: "phone" | "email"
+  identifier: string
+  otp: string
+}) {
+  const challenge = await findLatestAuthChallenge(params.channel, params.identifier)
+  if (!challenge) {
+    return {
+      error: {
+        status: 400,
+        body: buildAuthError("Code expired. Request a new one.", "OTP_NOT_FOUND"),
+      },
+    }
+  }
+
+  if (challenge.lockedUntil && challenge.lockedUntil > new Date()) {
+    return {
+      error: {
+        status: 429,
+        body: buildAuthError(
+          "Too many failed attempts. Try again later.",
+          "OTP_TEMPORARILY_LOCKED",
+          {
+            retryAfterSeconds: Math.max(
+              1,
+              Math.ceil((challenge.lockedUntil.getTime() - Date.now()) / 1000)
+            ),
+          }
+        ),
+      },
+    }
+  }
+
+  if (challenge.expiresAt < new Date()) {
+    return {
+      error: {
+        status: 400,
+        body: buildAuthError("Code expired. Request a new one.", "OTP_EXPIRED"),
+      },
+    }
+  }
+
+  if (challenge.otp !== hashToken(params.otp)) {
+    const attempts = challenge.verifyAttempts + 1
+    const lockedUntil =
+      attempts >= AUTH_OTP_MAX_VERIFY_ATTEMPTS
+        ? new Date(Date.now() + AUTH_OTP_LOCKOUT_MS)
+        : null
+
+    await prisma.authChallenge.update({
+      where: { id: challenge.id },
+      data: {
+        verifyAttempts: attempts,
+        lockedUntil,
+      },
+    })
+
+    return {
+      error: {
+        status: attempts >= AUTH_OTP_MAX_VERIFY_ATTEMPTS ? 429 : 400,
+        body: buildAuthError(
+          attempts >= AUTH_OTP_MAX_VERIFY_ATTEMPTS
+            ? "Too many failed attempts. Request a new code later."
+            : "That code is incorrect. Try again.",
+          attempts >= AUTH_OTP_MAX_VERIFY_ATTEMPTS
+            ? "OTP_MAX_ATTEMPTS_REACHED"
+            : "OTP_INVALID",
+          attempts >= AUTH_OTP_MAX_VERIFY_ATTEMPTS
+            ? { retryAfterSeconds: Math.floor(AUTH_OTP_LOCKOUT_MS / 1000) }
+            : {}
+        ),
+      },
+    }
+  }
+
+  const verified = await prisma.authChallenge.update({
+    where: { id: challenge.id },
+    data: {
+      verifiedAt: new Date(),
+      verifyAttempts: 0,
+      lockedUntil: null,
+    },
+  })
+
+  return { challenge: verified }
+}
+
+function logAuthEvent(event: string, details: Record<string, unknown>) {
+  console.info(
+    JSON.stringify({
+      scope: "auth",
+      event,
+      ...details,
+      timestamp: new Date().toISOString(),
+    })
+  )
 }
 
 /**
@@ -344,7 +736,7 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid provider" })
     }
 
-    const normalizedEmail = parseNonEmptyString(email)
+    const normalizedEmail = normalizeEmail(email)
     const normalizedName = parseNonEmptyString(name)
     const resolvedEmail =
       normalizedEmail ??
@@ -385,6 +777,9 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
             ...(typeof avatarUrl === "string" && avatarUrl.trim().length > 0
               ? { providerAvatarUrl: avatarUrl.trim() }
               : {}),
+            ...(provider === "apple"
+              ? { appleProviderId: normalizedProviderUserId }
+              : { googleProviderId: normalizedProviderUserId }),
           },
         })
       }
@@ -419,6 +814,11 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
                   ? { providerAvatarUrl: avatarUrl.trim() }
                   : {}),
                 emailVerified: true,
+                emailVerifiedAt: existingUser.emailVerifiedAt ?? new Date(),
+                ...(provider === "apple"
+                  ? { appleProviderId: normalizedProviderUserId }
+                  : { googleProviderId: normalizedProviderUserId }),
+                authMethods: mergeAuthMethods(existingUser.authMethods, provider),
               },
             })
           : await prisma.user.create({
@@ -431,6 +831,12 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
                     : undefined,
                 roleDefault: "passenger",
                 emailVerified: true,
+                emailVerifiedAt: new Date(),
+                ...(provider === "apple"
+                  ? { appleProviderId: normalizedProviderUserId }
+                  : { googleProviderId: normalizedProviderUserId }),
+                authMethods: [provider],
+                lastLoginAt: new Date(),
               },
             })
 
@@ -446,7 +852,12 @@ export async function oauthLogin(req: AuthRequest, res: Response) {
 
     await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<OAuthBody>)
 
-    const response = await buildAuthResponse(user)
+    const authenticatedUser = await markSuccessfulAuth(user.id, provider, {
+      ...(provider === "apple"
+        ? { appleProviderId: normalizedProviderUserId }
+        : { googleProviderId: normalizedProviderUserId }),
+    })
+    const response = await buildAuthResponse(authenticatedUser ?? user)
     return res.status(200).json(response)
   } catch (err) {
     if (err instanceof LocationValidationError) {
@@ -465,8 +876,9 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
   try {
     const { name, email, password, phone } = (req.body ??
       {}) as Partial<RegisterBody>
+    const normalizedEmail = normalizeEmail(email)
 
-    if (!name || !email || !password) {
+    if (!name || !normalizedEmail || !password) {
       return res
         .status(400)
         .json({ error: "name, email, and password are required" })
@@ -478,14 +890,14 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
         .json({ error: "Password must be at least 8 characters long" })
     }
 
-    const reviewBypass = isAppReviewEmail(email)
+    const reviewBypass = isAppReviewEmail(normalizedEmail)
     const requestedPhone =
       typeof phone === "string" && phone.trim().length > 0
         ? parsePhoneOrThrow(phone)
         : null
 
     const existing = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
       include: { oauthAccounts: true },
     })
 
@@ -521,17 +933,27 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
           name,
           passwordHash: hash,
           emailVerified: existing.emailVerified || reviewBypass,
+          emailVerifiedAt:
+            existing.emailVerified || reviewBypass
+              ? (existing.emailVerifiedAt ?? new Date())
+              : null,
           ...(effectivePhone != null ? { phone: effectivePhone } : {}),
           ...(effectivePhone != null
             ? {
                 phoneVerified:
                   reviewBypass ||
                   (samePhone && existing.phoneVerified),
+                phoneVerifiedAt:
+                  reviewBypass || (samePhone && existing.phoneVerified)
+                    ? (existing.phoneVerifiedAt ?? new Date())
+                    : null,
                 phoneVerifyOtp: null,
                 phoneVerifyOtpExpiresAt: null,
                 phoneVerifyOtpAttempts: 0,
               }
             : {}),
+          authMethods: mergeAuthMethods(existing.authMethods, "legacy_password"),
+          lastLoginAt: new Date(),
         },
       })
 
@@ -551,14 +973,20 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
     const user = await prisma.user.create({
       data: {
         name,
-        email,
+        email: normalizedEmail,
         passwordHash,
         roleDefault: "passenger",
         emailVerified: reviewBypass,
+        emailVerifiedAt: reviewBypass ? new Date() : null,
         ...(effectivePhone != null ? { phone: effectivePhone } : {}),
         ...(effectivePhone != null
-            ? { phoneVerified: reviewBypass }
+            ? {
+                phoneVerified: reviewBypass,
+                phoneVerifiedAt: reviewBypass ? new Date() : null,
+              }
             : {}),
+        authMethods: ["legacy_password"],
+        lastLoginAt: new Date(),
       },
     })
 
@@ -580,7 +1008,7 @@ export async function registerWithEmail(req: AuthRequest, res: Response) {
 export async function loginWithEmail(req: AuthRequest, res: Response) {
   try {
     const { email, password } = (req.body ?? {}) as Partial<LoginBody>
-    const normalizedEmail = parseNonEmptyString(email)
+    const normalizedEmail = normalizeEmail(email)
 
     if (!normalizedEmail || !password) {
       return res.status(400).json({ error: "email and password are required" })
@@ -610,14 +1038,15 @@ export async function loginWithEmail(req: AuthRequest, res: Response) {
 
     await upsertLocationIfProvided(user.id, (req.body ?? {}) as Partial<LoginBody>)
 
-    if (!user.emailVerified && isAppReviewEmail(user.email)) {
+    if (!user.emailVerified && user.email && isAppReviewEmail(user.email)) {
       user = await prisma.user.update({
         where: { id: user.id },
-        data: { emailVerified: true },
+        data: { emailVerified: true, emailVerifiedAt: new Date() },
       })
     }
 
-    const response = await buildAuthResponse(user)
+    const authenticatedUser = await markSuccessfulAuth(user.id, "legacy_password")
+    const response = await buildAuthResponse(authenticatedUser ?? user)
     return res.status(200).json(response)
   } catch (err) {
     if (err instanceof LocationValidationError) {
@@ -661,7 +1090,7 @@ export async function sendLoginEmailOtp(req: AuthRequest, res: Response) {
     })
 
     await sendEmailVerificationOtp({
-      email: updated.email,
+      email: updated.email ?? normalizedEmail,
       name: updated.name,
       otp,
     })
@@ -725,6 +1154,470 @@ export async function sendLoginPhoneOtp(req: AuthRequest, res: Response) {
 }
 
 /**
+ * POST /api/auth/continue/phone
+ * Body: { phone, deviceId? }
+ */
+export async function sendContinuePhoneOtp(req: AuthRequest, res: Response) {
+  try {
+    const body = (req.body ?? {}) as ContinueAuthBody
+    const normalizedPhone = parsePhoneOrThrow(body.phone)
+    const requestedFromIp = getRequestedIp(req)
+    const requestedFromDevice = getRequestedDeviceId(body as Record<string, unknown>)
+    const existingUser = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (existingUser && !isAccountActive(existingUser.accountStatus)) {
+      return res.status(403).json(
+        buildAuthError(
+          "This account is not available. Contact support for help.",
+          "ACCOUNT_UNAVAILABLE"
+        )
+      )
+    }
+
+    const created = await createAuthChallenge({
+      channel: "phone",
+      identifier: normalizedPhone,
+      requestedFromIp,
+      requestedFromDevice,
+      userId: existingUser?.id ?? null,
+    })
+
+    if (created.error) {
+      return res.status(created.error.status).json(created.error.body)
+    }
+
+    await sendAuthOtpSms({
+      phone: normalizedPhone,
+      otp: created.otp!,
+    })
+
+    logAuthEvent("otp_sent", {
+      channel: "phone",
+      existingUser: existingUser != null,
+      requestedFromIp,
+      requestedFromDevice,
+      identifierEnding: normalizedPhone.slice(-4),
+    })
+
+    return res.status(200).json({
+      message: "Code sent.",
+      channel: "phone",
+      nextStep: "verify_otp",
+      resendAvailableInSeconds: Math.floor(
+        AUTH_OTP_RESEND_COOLDOWN_MS / 1000
+      ),
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    if (err instanceof TwilioNotConfiguredError) {
+      return res.status(503).json({ error: "SMS service is not configured" })
+    }
+    console.error("POST /auth/continue/phone error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/continue/phone/verify
+ * Body: { phone, otp, deviceId? }
+ */
+export async function verifyContinuePhoneOtp(req: AuthRequest, res: Response) {
+  try {
+    const body = (req.body ?? {}) as VerifyContinueAuthBody
+    const normalizedPhone = parsePhoneOrThrow(body.phone)
+    const otp = parseNonEmptyString(body.otp)
+
+    if (!otp) {
+      return res.status(400).json({ error: "phone and otp are required" })
+    }
+
+    const verification = await verifyAuthChallenge({
+      channel: "phone",
+      identifier: normalizedPhone,
+      otp,
+    })
+
+    if (verification.error) {
+      return res
+        .status(verification.error.status)
+        .json(verification.error.body)
+    }
+
+    const verifiedChallenge = verification.challenge!
+    const existingUser = await prisma.user.findUnique({
+      where: { phone: normalizedPhone },
+    })
+
+    if (existingUser) {
+      if (!isAccountActive(existingUser.accountStatus)) {
+        return res.status(403).json(
+          buildAuthError(
+            "This account is not available. Contact support for help.",
+            "ACCOUNT_UNAVAILABLE"
+          )
+        )
+      }
+
+      const updatedUser = await markSuccessfulAuth(
+        existingUser.id,
+        authMethodForChannel("phone"),
+        {
+          phoneVerified: true,
+          phoneVerifiedAt: existingUser.phoneVerifiedAt ?? new Date(),
+        }
+      )
+
+      await prisma.authChallenge.update({
+        where: { id: verifiedChallenge.id },
+        data: {
+          userId: existingUser.id,
+          consumedAt: new Date(),
+        },
+      })
+
+      logAuthEvent("otp_verified", {
+        channel: "phone",
+        outcome: "existing_user",
+        userId: existingUser.id,
+      })
+
+      const response = await buildAuthResponse(updatedUser!)
+      return res.status(200).json({
+        nextStep: "home",
+        isNewUser: false,
+        ...response,
+      })
+    }
+
+    const onboardingToken = signOnboardingToken({
+      challengeId: verifiedChallenge.id,
+      channel: "phone",
+      identifier: normalizedPhone,
+    })
+
+    logAuthEvent("otp_verified", {
+      channel: "phone",
+      outcome: "new_user",
+      identifierEnding: normalizedPhone.slice(-4),
+    })
+
+    return res.status(200).json({
+      nextStep: "complete_profile",
+      isNewUser: true,
+      onboardingToken,
+      onboarding: {
+        phone: normalizedPhone,
+        phoneVerified: true,
+      },
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    console.error("POST /auth/continue/phone/verify error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/continue/email
+ * Body: { email, deviceId? }
+ */
+export async function sendContinueEmailOtp(req: AuthRequest, res: Response) {
+  try {
+    const body = (req.body ?? {}) as ContinueAuthBody
+    const normalizedEmail = normalizeEmail(body.email)
+    if (!normalizedEmail) {
+      return res.status(400).json({ error: "email is required" })
+    }
+
+    const requestedFromIp = getRequestedIp(req)
+    const requestedFromDevice = getRequestedDeviceId(body as Record<string, unknown>)
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    })
+
+    if (existingUser && !isAccountActive(existingUser.accountStatus)) {
+      return res.status(403).json(
+        buildAuthError(
+          "This account is not available. Contact support for help.",
+          "ACCOUNT_UNAVAILABLE"
+        )
+      )
+    }
+
+    const created = await createAuthChallenge({
+      channel: "email",
+      identifier: normalizedEmail,
+      requestedFromIp,
+      requestedFromDevice,
+      userId: existingUser?.id ?? null,
+    })
+
+    if (created.error) {
+      return res.status(created.error.status).json(created.error.body)
+    }
+
+    await sendAuthOtpEmail({
+      email: normalizedEmail,
+      name: existingUser?.name,
+      otp: created.otp!,
+    })
+
+    logAuthEvent("otp_sent", {
+      channel: "email",
+      existingUser: existingUser != null,
+      requestedFromIp,
+      requestedFromDevice,
+      identifierEnding: normalizedEmail.slice(-6),
+    })
+
+    return res.status(200).json({
+      message: "Code sent.",
+      channel: "email",
+      nextStep: "verify_otp",
+      resendAvailableInSeconds: Math.floor(
+        AUTH_OTP_RESEND_COOLDOWN_MS / 1000
+      ),
+    })
+  } catch (err) {
+    console.error("POST /auth/continue/email error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/continue/email/verify
+ * Body: { email, otp, deviceId? }
+ */
+export async function verifyContinueEmailOtp(req: AuthRequest, res: Response) {
+  try {
+    const body = (req.body ?? {}) as VerifyContinueAuthBody
+    const normalizedEmail = normalizeEmail(body.email)
+    const otp = parseNonEmptyString(body.otp)
+
+    if (!normalizedEmail || !otp) {
+      return res.status(400).json({ error: "email and otp are required" })
+    }
+
+    const verification = await verifyAuthChallenge({
+      channel: "email",
+      identifier: normalizedEmail,
+      otp,
+    })
+
+    if (verification.error) {
+      return res
+        .status(verification.error.status)
+        .json(verification.error.body)
+    }
+
+    const verifiedChallenge = verification.challenge!
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    })
+
+    if (existingUser) {
+      if (!isAccountActive(existingUser.accountStatus)) {
+        return res.status(403).json(
+          buildAuthError(
+            "This account is not available. Contact support for help.",
+            "ACCOUNT_UNAVAILABLE"
+          )
+        )
+      }
+
+      const updatedUser = await markSuccessfulAuth(
+        existingUser.id,
+        authMethodForChannel("email"),
+        {
+          emailVerified: true,
+          emailVerifiedAt: existingUser.emailVerifiedAt ?? new Date(),
+        }
+      )
+
+      await prisma.authChallenge.update({
+        where: { id: verifiedChallenge.id },
+        data: {
+          userId: existingUser.id,
+          consumedAt: new Date(),
+        },
+      })
+
+      logAuthEvent("otp_verified", {
+        channel: "email",
+        outcome: "existing_user",
+        userId: existingUser.id,
+      })
+
+      const response = await buildAuthResponse(updatedUser!)
+      return res.status(200).json({
+        nextStep: "home",
+        isNewUser: false,
+        ...response,
+      })
+    }
+
+    const onboardingToken = signOnboardingToken({
+      challengeId: verifiedChallenge.id,
+      channel: "email",
+      identifier: normalizedEmail,
+    })
+
+    logAuthEvent("otp_verified", {
+      channel: "email",
+      outcome: "new_user",
+      identifierEnding: normalizedEmail.slice(-6),
+    })
+
+    return res.status(200).json({
+      nextStep: "complete_profile",
+      isNewUser: true,
+      onboardingToken,
+      onboarding: {
+        email: normalizedEmail,
+        emailVerified: true,
+      },
+    })
+  } catch (err) {
+    console.error("POST /auth/continue/email/verify error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
+ * POST /api/auth/onboarding/complete
+ * Body: { onboardingToken, firstName, lastName, email?, phone?, deviceId? }
+ */
+export async function completeOnboarding(req: AuthRequest, res: Response) {
+  try {
+    const body = (req.body ?? {}) as CompleteOnboardingBody
+    const onboardingToken = parseNonEmptyString(body.onboardingToken)
+    const firstName = parseNonEmptyString(body.firstName)
+    const lastName = parseNonEmptyString(body.lastName)
+
+    if (!onboardingToken || !firstName || !lastName) {
+      return res.status(400).json({
+        error: "onboardingToken, firstName, and lastName are required",
+      })
+    }
+
+    let payload: { challengeId: string; channel: "phone" | "email"; identifier: string }
+    try {
+      payload = verifyOnboardingToken(onboardingToken)
+    } catch {
+      return res.status(401).json(
+        buildAuthError("This onboarding session has expired.", "ONBOARDING_EXPIRED")
+      )
+    }
+
+    const challenge = await prisma.authChallenge.findUnique({
+      where: { id: payload.challengeId },
+    })
+
+    if (
+      !challenge ||
+      challenge.channel !== payload.channel ||
+      challenge.identifier !== payload.identifier ||
+      !challenge.verifiedAt ||
+      challenge.consumedAt
+    ) {
+      return res.status(401).json(
+        buildAuthError("This onboarding session has expired.", "ONBOARDING_EXPIRED")
+      )
+    }
+
+    const fullName = splitNameParts(firstName, lastName)
+    const normalizedEmail =
+      payload.channel === "email"
+        ? payload.identifier
+        : normalizeEmail(body.email)
+    const normalizedPhone =
+      payload.channel === "phone"
+        ? payload.identifier
+        : body.phone
+          ? parsePhoneOrThrow(body.phone)
+          : null
+
+    if (normalizedEmail) {
+      const emailOwner = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        select: { id: true },
+      })
+      if (emailOwner) {
+        return res.status(409).json(
+          buildAuthError(
+            "That email is already linked to another account.",
+            "EMAIL_ALREADY_LINKED"
+          )
+        )
+      }
+    }
+
+    if (normalizedPhone) {
+      const phoneOwner = await prisma.user.findUnique({
+        where: { phone: normalizedPhone },
+        select: { id: true },
+      })
+      if (phoneOwner) {
+        return res.status(409).json(
+          buildAuthError(
+            "That phone number is already linked to another account.",
+            "PHONE_ALREADY_LINKED"
+          )
+        )
+      }
+    }
+
+    const user = await prisma.user.create({
+      data: {
+        name: fullName,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        roleDefault: "passenger",
+        emailVerified: payload.channel === "email",
+        emailVerifiedAt: payload.channel === "email" ? new Date() : null,
+        phoneVerified: payload.channel === "phone",
+        phoneVerifiedAt: payload.channel === "phone" ? new Date() : null,
+        authMethods: [authMethodForChannel(payload.channel)],
+        lastLoginAt: new Date(),
+      },
+    })
+
+    await prisma.authChallenge.update({
+      where: { id: challenge.id },
+      data: {
+        userId: user.id,
+        consumedAt: new Date(),
+      },
+    })
+
+    logAuthEvent("new_user_created", {
+      channel: payload.channel,
+      userId: user.id,
+    })
+
+    const response = await buildAuthResponse(user)
+    return res.status(201).json({
+      nextStep: "home",
+      isNewUser: true,
+      needsPhoneVerification: Boolean(user.phone) && !user.phoneVerified,
+      ...response,
+    })
+  } catch (err) {
+    if (err instanceof PhoneValidationError) {
+      return res.status(400).json({ error: err.message })
+    }
+    console.error("POST /auth/onboarding/complete error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
+}
+
+/**
  * GET /api/auth/me
  */
 export async function getMe(req: AuthRequest, res: Response) {
@@ -744,17 +1637,24 @@ export async function getMe(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: "User not found" })
     }
 
-    return res.json({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      phoneVerified: user.phoneVerified,
-      emailVerified: user.emailVerified,
-      roleDefault: user.roleDefault,
-      providerAvatarUrl: user.providerAvatarUrl,
-      driverProfile: user.driverProfile,
-    })
+      return res.json({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        phoneVerified: user.phoneVerified,
+        emailVerified: user.emailVerified,
+        phoneVerifiedAt: user.phoneVerifiedAt,
+        emailVerifiedAt: user.emailVerifiedAt,
+        authMethods: user.authMethods,
+        accountStatus: user.accountStatus,
+        lastLoginAt: user.lastLoginAt,
+        appleProviderId: user.appleProviderId,
+        googleProviderId: user.googleProviderId,
+        roleDefault: user.roleDefault,
+        providerAvatarUrl: user.providerAvatarUrl,
+        driverProfile: user.driverProfile,
+      })
   } catch (err) {
     console.error("GET /auth/me error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -908,7 +1808,7 @@ export async function sendEmailVerifyOtp(req: AuthRequest, res: Response) {
     })
 
     await sendEmailVerificationOtp({
-      email: updated.email,
+      email: updated.email ?? email ?? "",
       name: updated.name,
       otp,
     })
@@ -964,7 +1864,7 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       let emailSendFailed = false
       try {
         await sendEmailVerificationOtp({
-          email: user.email,
+          email: user.email ?? email ?? "",
           name: user.name,
           otp: newOtp,
         })
@@ -1009,11 +1909,18 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       where: { id: user.id },
       data: {
         emailVerified: true,
+        emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+        emailVerifyOtp: null,
+        emailVerifyOtpExpiresAt: null,
         emailVerifyOtpAttempts: 0,
       },
     })
 
-    const response = await buildAuthResponse(updated)
+    const authenticatedUser = await markSuccessfulAuth(
+      updated.id,
+      authMethodForChannel("email")
+    )
+    const response = await buildAuthResponse(authenticatedUser ?? updated)
 
     console.log(response)
     return res.status(200).json(response)
@@ -1154,13 +2061,18 @@ export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
       where: { id: user.id },
       data: {
         phoneVerified: true,
+        phoneVerifiedAt: user.phoneVerifiedAt ?? new Date(),
         phoneVerifyOtp: null,
         phoneVerifyOtpExpiresAt: null,
         phoneVerifyOtpAttempts: 0,
       },
     })
 
-    const response = await buildAuthResponse(updated)
+    const authenticatedUser = await markSuccessfulAuth(
+      updated.id,
+      authMethodForChannel("phone")
+    )
+    const response = await buildAuthResponse(authenticatedUser ?? updated)
     return res.status(200).json(response)
   } catch (err) {
     if (err instanceof PhoneValidationError) {
@@ -1211,7 +2123,7 @@ export async function sendPasswordResetOtpEmail(
     })
 
     await sendPasswordResetOtp({
-      email: updated.email,
+      email: updated.email ?? email ?? "",
       name: updated.name,
       otp,
     })
@@ -1273,7 +2185,7 @@ export async function resetPasswordWithOtp(req: AuthRequest, res: Response) {
       let emailSendFailed = false
       try {
         await sendPasswordResetOtp({
-          email: user.email,
+          email: user.email ?? email ?? "",
           name: user.name,
           otp: newOtp,
         })

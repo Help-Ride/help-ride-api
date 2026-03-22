@@ -67,74 +67,71 @@ Accept: text/html
 ###
 
 ################################################
-### 🔐 AUTH – EMAIL/PASSWORD + OTP
+### 🔐 AUTH – PASSWORDLESS CONTINUE FLOW
 ################################################
 
-### REGISTER WITH EMAIL/PASSWORD
-# Phone is required for standard signup and SMS ride alerts.
-POST {{baseUrl}}/auth/register
+### START PHONE CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/phone
 Content-Type: application/json
 
 {
-  "name": "Email User",
+  "phone": "{{phone}}",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### VERIFY PHONE CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/phone/verify
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "otp": "112991",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### START EMAIL CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/email
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### VERIFY EMAIL CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/email/verify
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "otp": "112991",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### COMPLETE NEW-USER ONBOARDING
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+
+{
+  "onboardingToken": "{{onboardingToken}}",
+  "firstName": "Rishi",
+  "lastName": "Patel",
   "email": "{{email}}",
   "phone": "{{phone}}",
-  "password": "StrongPass123!"
+  "deviceId": "ios-simulator-auth-device"
 }
 
 ###
 
-### LOGIN WITH EMAIL/PASSWORD
-# Use same email/password as above.
-# Password login returns tokens immediately.
-# For passwordless sign-in, use the email or phone OTP endpoints below.
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
-
-{
-  "email": "{{email}}",
-  "password": "StrongPass123!"
-}
-
-###
-
-### LOGIN WITH LOCATION SNAPSHOT (OPTIONAL)
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
-
-{
-  "email": "{{email}}",
-  "password": "StrongPass123!",
-  "lat": 43.4643,
-  "lng": -80.5204,
-  "accuracyMeters": 15
-}
-
-###
-
-### SEND LOGIN OTP BY EMAIL
-# Returns 404 with ACCOUNT_NOT_FOUND when the email is not registered.
-POST {{baseUrl}}/auth/login-email/send-otp
-Content-Type: application/json
-
-{
-  "email": "{{email}}"
-}
-
-###
-
-### SEND LOGIN OTP BY PHONE
-# Returns 404 with ACCOUNT_NOT_FOUND when the phone number is not registered.
-POST {{baseUrl}}/auth/login-phone/send-otp
-Content-Type: application/json
-
-{
-  "phone": "{{phone}}"
-}
-
-###
-
-# Set from login/register/oauth response
+# Set from continue/onboarding/oauth response
 @refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2OTQxMDI0MCwiZXhwIjoxNzcwMDE1MDQwLCJqdGkiOiI5MjMxNTgzMi04ZTRjLTRkNDYtOGU1Ni0xMjk2YTFmYjAyZDEifQ.5S-Vr3yo6D2X5p8kirJAo_1Mk2187vk95eQLQdV9jT4
 
 ### REFRESH TOKENS
@@ -157,9 +154,33 @@ Content-Type: application/json
 
 ###
 
+### LEGACY REGISTER WITH EMAIL/PASSWORD (TEMPORARY MIGRATION ONLY)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Email User",
+  "email": "{{email}}",
+  "phone": "{{phone}}",
+  "password": "StrongPass123!"
+}
+
+###
+
+### LEGACY LOGIN WITH EMAIL/PASSWORD (TEMPORARY MIGRATION ONLY)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "StrongPass123!"
+}
+
+###
+
 ### RESEND EMAIL VERIFICATION OTP
-# Use `/auth/login-email/send-otp` from the login screen when you need
-# a missing-account response instead of the generic verification flow.
+# Use `/auth/continue/email` from the new mobile auth entry flow when you
+# want unified sign-in + sign-up behavior.
 POST {{baseUrl}}/auth/verify-email/send-otp
 Content-Type: application/json
 

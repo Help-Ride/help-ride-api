@@ -391,13 +391,13 @@ function mapStripeAccountStatus(account: Stripe.Account) {
 
 async function createConnectAccountForUser(args: {
   userId: string
-  email: string
+  email: string | null
   name: string
 }) {
   const createdAccount = await stripe.accounts.create({
     type: "express",
     country: getConnectCountry(),
-    email: args.email,
+    ...(args.email ? { email: args.email } : {}),
     business_type: "individual",
     business_profile: getConnectBusinessProfile(),
     capabilities: {
@@ -422,7 +422,7 @@ async function createConnectAccountForUser(args: {
 
 async function getOrCreateConnectAccountForUser(args: {
   userId: string
-  email: string
+  email: string | null
   name: string
   stripeAccountId: string | null
 }) {

@@ -1,13 +1,18 @@
 import { Router } from "express"
 import { authGuard } from "../middleware/auth.js"
 import {
+  completeOnboarding,
   oauthLogin,
   registerWithEmail,
   loginWithEmail,
+  sendContinueEmailOtp,
+  sendContinuePhoneOtp,
   sendLoginEmailOtp,
   sendLoginPhoneOtp,
   getMe,
   sendEmailVerifyOtp,
+  verifyContinueEmailOtp,
+  verifyContinuePhoneOtp,
   verifyEmailWithOtp,
   sendPhoneVerifyOtp,
   verifyPhoneWithOtp,
@@ -22,6 +27,11 @@ import {
 const router = Router()
 
 router.post("/oauth", oauthLogin)
+router.post("/continue/phone", sendContinuePhoneOtp)
+router.post("/continue/phone/verify", verifyContinuePhoneOtp)
+router.post("/continue/email", sendContinueEmailOtp)
+router.post("/continue/email/verify", verifyContinueEmailOtp)
+router.post("/onboarding/complete", completeOnboarding)
 
 router.post("/register", registerWithEmail)
 router.post("/login", loginWithEmail)

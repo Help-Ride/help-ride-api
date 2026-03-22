@@ -28,7 +28,29 @@ Dev:     https://dev-help-ride-api.vercel.app/api
 
 ## 🔐 Authentication
 
-### Register (Email + Password)
+### Passwordless Continue Flow
+
+The mobile rider app now uses a unified passwordless auth entry flow:
+
+- `POST /auth/continue/phone`
+- `POST /auth/continue/phone/verify`
+- `POST /auth/continue/email`
+- `POST /auth/continue/email/verify`
+- `POST /auth/onboarding/complete`
+
+Phone OTP is the primary path. Apple and Google OAuth remain supported. Email
+OTP is the fallback path. If the OTP belongs to an existing rider, the verify
+endpoint returns tokens immediately. If the OTP belongs to a new rider, the
+verify endpoint returns an `onboardingToken`, and the client finishes the
+minimal profile with `/auth/onboarding/complete` before receiving session
+tokens.
+
+Legacy password login and registration are still available temporarily for
+migration, but they are no longer exposed in the main rider UI.
+
+---
+
+### Register (Legacy Email + Password)
 
 `POST /auth/register`
 
@@ -69,7 +91,7 @@ App-review allowlisted emails can still use the existing bypass flow unchanged.
 
 ---
 
-### Login
+### Login (Legacy)
 
 `POST /auth/login`
 

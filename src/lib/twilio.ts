@@ -70,6 +70,15 @@ export async function sendPhoneVerificationOtpSms(params: {
   await sendSms(phone, body)
 }
 
+export async function sendAuthOtpSms(params: {
+  phone: string
+  otp: string
+}) {
+  const { phone, otp } = params
+  const body = `Your ${APP_NAME} sign-in code is ${otp}. It expires in 5 minutes.`
+  await sendSms(phone, body)
+}
+
 export async function sendPasswordResetOtpSms(params: {
   phone: string
   name: string
