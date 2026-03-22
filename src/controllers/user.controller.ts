@@ -748,7 +748,12 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
           passwordHash: null,
           providerAvatarUrl: null,
           emailVerified: false,
+          emailVerifiedAt: null,
           phoneVerified: false,
+          phoneVerifiedAt: null,
+          appleProviderId: null,
+          googleProviderId: null,
+          authMethods: [],
           stripeAccountId: preserveStripeConnectAccount
             ? user.stripeAccountId
             : null,

@@ -121,7 +121,7 @@ POST {{baseUrl}}/auth/onboarding/complete
 Content-Type: application/json
 
 {
-  "onboardingToken": "{{onboardingToken}}",
+  "onboardingToken": "onboardingToken",
   "firstName": "Rishi",
   "lastName": "Patel",
   "email": "{{email}}",
