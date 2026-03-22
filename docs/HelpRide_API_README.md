@@ -537,6 +537,12 @@ Response:
 
 `GET /rides/me/list`
 
+Recurring schedules are still stored and returned as individual ride
+occurrences. Each recurring occurrence includes `rideType: "recurring"` plus a
+shared `recurringSeriesId`, so the app can group them into one recurring series
+for management while preserving occurrence-level bookings, status, edits, and
+exceptions.
+
 Response:
 
 ```json
@@ -550,6 +556,10 @@ Response:
     "pricePerSeat": 22,
     "seatsTotal": 1,
     "seatsAvailable": 1,
+    "rideType": "recurring",
+    "recurringSeriesId": "series-uuid",
+    "recurrenceDays": ["monday", "wednesday", "friday"],
+    "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
     "status": "open",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "updatedAt": "2025-01-01T00:00:00.000Z"
@@ -600,6 +610,30 @@ Response:
 `pricePerSeat` is immutable after a ride is created. If you need a different
 fare, create a new ride instead of updating the existing one.
 
+Recurring rides support an optional `scope` field:
+
+- `occurrence`: update only the selected occurrence
+- `future`: update the selected occurrence and future occurrences in the same
+  recurring series
+- `series`: update every occurrence in the same recurring series
+
+The backend keeps occurrence rows intact and applies the edit to the selected
+set of rows. This preserves occurrence-level booking, cancellation, and
+exception management.
+
+Example request:
+
+```json
+{
+  "fromCity": "Waterloo",
+  "toCity": "Toronto",
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "arrivalTime": "2025-12-20T10:00:00.000Z",
+  "seatsTotal": 3,
+  "scope": "future"
+}
+```
+
 Response:
 
 ```json
@@ -620,9 +654,12 @@ Response:
 
 ---
 
-### Delete Ride (Driver)
+### Delete Ride (Driver, Hard Delete)
 
 `DELETE /rides/{rideId}`
+
+This permanently removes the ride row. It should not be used as the normal
+operational cancel path for recurring management.
 
 Response:
 
@@ -642,9 +679,20 @@ Cancel body:
 
 ```json
 {
-  "reason": "Driver unavailable"
+  "reason": "Driver unavailable",
+  "scope": "occurrence"
 }
 ```
+
+Recurring cancellation also supports:
+
+- `occurrence`
+- `future`
+- `series`
+
+This marks the selected occurrence(s) as cancelled without deleting their ride
+rows, so booking history, status tracking, and recurring-series exception
+reporting remain intact.
 
 Start response:
 

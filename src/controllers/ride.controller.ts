@@ -25,6 +25,7 @@ interface CreateRideBody {
   recurrenceDays?: string[] | null
   recurrenceEndDate?: string | null
   occurrenceStartTimes?: string[] | null
+  scope?: string | null
 }
 
 interface RidePricingPreviewBody {
@@ -57,6 +58,7 @@ const RIDE_RECURRENCE_DAYS = [
   "saturday",
   "sunday",
 ] as const
+const RIDE_EDIT_SCOPES = ["occurrence", "future", "series"] as const
 const ACTIVE_BOOKING_NOTIFICATION_STATUSES = [
   "pending",
   "confirmed",
@@ -68,10 +70,12 @@ const MAX_RECURRING_RIDE_OCCURRENCES = 90
 
 type RideAmenity = (typeof RIDE_AMENITIES)[number]
 type RideType = (typeof RIDE_TYPES)[number]
+type RideEditScope = (typeof RIDE_EDIT_SCOPES)[number]
 
 const RIDE_AMENITY_SET = new Set<string>(RIDE_AMENITIES)
 const RIDE_TYPE_SET = new Set<string>(RIDE_TYPES)
 const RIDE_RECURRENCE_DAY_SET = new Set<string>(RIDE_RECURRENCE_DAYS)
+const RIDE_EDIT_SCOPE_SET = new Set<string>(RIDE_EDIT_SCOPES)
 
 function parseArrivalTime(
   value: unknown,
@@ -302,6 +306,158 @@ function parseOccurrenceStartTimes(
   }
 
   return { occurrenceStartTimes: deduped }
+}
+
+function isRecurringRide(ride: {
+  rideType?: string | null
+  recurringSeriesId?: string | null
+}) {
+  return (
+    ride.rideType?.trim().toLowerCase() === "recurring" &&
+    !!ride.recurringSeriesId?.trim()
+  )
+}
+
+function parseRideEditScope(
+  value: unknown
+): { scope: RideEditScope } | { error: string } {
+  if (value == null || value === "") {
+    return { scope: "occurrence" }
+  }
+
+  if (typeof value !== "string") {
+    return { error: "scope must be a string" }
+  }
+
+  const scope = value.trim().toLowerCase()
+  if (!RIDE_EDIT_SCOPE_SET.has(scope)) {
+    return {
+      error: `scope must be one of: ${RIDE_EDIT_SCOPES.join(", ")}`,
+    }
+  }
+
+  return { scope: scope as RideEditScope }
+}
+
+async function getScopedRideOccurrences(
+  ride: {
+    id: string
+    driverId: string
+    startTime: Date
+    rideType: string
+    recurringSeriesId: string | null
+  },
+  scope: RideEditScope
+) {
+  if (scope === "occurrence" || !isRecurringRide(ride)) {
+    const singleRide = await prisma.ride.findUnique({ where: { id: ride.id } })
+    return singleRide == null ? [] : [singleRide]
+  }
+
+  const seriesId = ride.recurringSeriesId!.trim()
+  const where =
+    scope === "future"
+      ? {
+          driverId: ride.driverId,
+          recurringSeriesId: seriesId,
+          startTime: { gte: ride.startTime },
+        }
+      : {
+          driverId: ride.driverId,
+          recurringSeriesId: seriesId,
+        }
+
+  return prisma.ride.findMany({
+    where,
+    orderBy: { startTime: "asc" },
+  })
+}
+
+function buildScopedRideUpdateData({
+  targetRide,
+  baseRide,
+  updates,
+  baseUpdatedStartTime,
+  explicitArrivalDurationMs,
+}: {
+  targetRide: {
+    id: string
+    startTime: Date
+    arrivalTime: Date | null
+    seatsTotal: number
+    seatsAvailable: number
+  }
+  baseRide: {
+    startTime: Date
+  }
+  updates: Partial<CreateRideBody>
+  baseUpdatedStartTime: Date
+  explicitArrivalDurationMs: number | null
+}) {
+  const updateData: Record<string, unknown> = {
+    ...(updates.fromCity && { fromCity: updates.fromCity }),
+    ...(updates.fromLat != null && { fromLat: updates.fromLat }),
+    ...(updates.fromLng != null && { fromLng: updates.fromLng }),
+    ...(updates.toCity && { toCity: updates.toCity }),
+    ...(updates.toLat != null && { toLat: updates.toLat }),
+    ...(updates.toLng != null && { toLng: updates.toLng }),
+  }
+
+  let targetStartTime = targetRide.startTime
+  if (updates.startTime !== undefined) {
+    const deltaMs =
+      baseUpdatedStartTime.getTime() - baseRide.startTime.getTime()
+    targetStartTime = new Date(targetRide.startTime.getTime() + deltaMs)
+    updateData.startTime = targetStartTime
+  }
+
+  if (updates.arrivalTime !== undefined) {
+    updateData.arrivalTime =
+      explicitArrivalDurationMs == null
+        ? null
+        : new Date(targetStartTime.getTime() + explicitArrivalDurationMs)
+  } else if (updates.startTime !== undefined && targetRide.arrivalTime != null) {
+    const deltaMs =
+      baseUpdatedStartTime.getTime() - baseRide.startTime.getTime()
+    updateData.arrivalTime = new Date(targetRide.arrivalTime.getTime() + deltaMs)
+  }
+
+  if (updates.stops !== undefined) {
+    const stopsResult = parseStops(updates.stops)
+    if ("error" in stopsResult) {
+      return { error: stopsResult.error }
+    }
+    updateData.stops = stopsResult.stops
+  }
+
+  if (updates.amenities !== undefined) {
+    const amenitiesResult = parseAmenities(updates.amenities)
+    if ("error" in amenitiesResult) {
+      return { error: amenitiesResult.error }
+    }
+    updateData.amenities = amenitiesResult.amenities
+  }
+
+  if (updates.additionalNotes !== undefined) {
+    const additionalNotesResult = parseAdditionalNotes(updates.additionalNotes)
+    if ("error" in additionalNotesResult) {
+      return { error: additionalNotesResult.error }
+    }
+    updateData.additionalNotes = additionalNotesResult.additionalNotes
+  }
+
+  if (updates.seatsTotal != null) {
+    updateData.seatsTotal = updates.seatsTotal
+    const delta = updates.seatsTotal - targetRide.seatsTotal
+    let nextSeatsAvailable = targetRide.seatsAvailable + delta
+    nextSeatsAvailable = Math.max(
+      0,
+      Math.min(nextSeatsAvailable, updates.seatsTotal)
+    )
+    updateData.seatsAvailable = nextSeatsAvailable
+  }
+
+  return { updateData }
 }
 
 function attachRideTiming<T extends { startTime: Date }>(ride: T) {
@@ -903,6 +1059,13 @@ export async function updateRide(req: AuthRequest, res: Response) {
     }
 
     const updates = req.body as Partial<CreateRideBody>
+    const scopeResult = parseRideEditScope(
+      updates.scope ?? req.query.scope ?? null
+    )
+    if ("error" in scopeResult) {
+      return res.status(400).json({ error: scopeResult.error })
+    }
+    const scope = scopeResult.scope
 
     if (updates.seatsTotal != null) {
       if (!Number.isInteger(updates.seatsTotal) || updates.seatsTotal <= 0) {
@@ -934,16 +1097,6 @@ export async function updateRide(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Coordinates must be valid numbers" })
     }
 
-    // Prepare update data
-    const updateData: any = {
-      ...(updates.fromCity && { fromCity: updates.fromCity }),
-      ...(updates.fromLat != null && { fromLat: updates.fromLat }),
-      ...(updates.fromLng != null && { fromLng: updates.fromLng }),
-      ...(updates.toCity && { toCity: updates.toCity }),
-      ...(updates.toLat != null && { toLat: updates.toLat }),
-      ...(updates.toLng != null && { toLng: updates.toLng }),
-    }
-
     let effectiveStartTime = ride.startTime
     if (updates.startTime !== undefined) {
       if (typeof updates.startTime !== "string") {
@@ -956,16 +1109,18 @@ export async function updateRide(req: AuthRequest, res: Response) {
       }
 
       effectiveStartTime = start
-      updateData.startTime = start
     }
 
+    let explicitArrivalDurationMs: number | null = null
     if (updates.arrivalTime !== undefined) {
       const arrivalTimeResult = parseArrivalTime(updates.arrivalTime, effectiveStartTime)
       if ("error" in arrivalTimeResult) {
         return res.status(400).json({ error: arrivalTimeResult.error })
       }
-
-      updateData.arrivalTime = arrivalTimeResult.arrivalTime
+      explicitArrivalDurationMs =
+        arrivalTimeResult.arrivalTime == null
+          ? null
+          : arrivalTimeResult.arrivalTime.getTime() - effectiveStartTime.getTime()
     } else if (updates.startTime !== undefined && ride.arrivalTime) {
       if (ride.arrivalTime <= effectiveStartTime) {
         return res.status(400).json({
@@ -975,75 +1130,81 @@ export async function updateRide(req: AuthRequest, res: Response) {
       }
     }
 
-    if (updates.stops !== undefined) {
-      const stopsResult = parseStops(updates.stops)
-      if ("error" in stopsResult) {
-        return res.status(400).json({ error: stopsResult.error })
-      }
-      updateData.stops = stopsResult.stops
-    }
-
-    if (updates.amenities !== undefined) {
-      const amenitiesResult = parseAmenities(updates.amenities)
-      if ("error" in amenitiesResult) {
-        return res.status(400).json({ error: amenitiesResult.error })
-      }
-      updateData.amenities = amenitiesResult.amenities
-    }
-
-    if (updates.additionalNotes !== undefined) {
-      const additionalNotesResult = parseAdditionalNotes(updates.additionalNotes)
-      if ("error" in additionalNotesResult) {
-        return res.status(400).json({ error: additionalNotesResult.error })
-      }
-      updateData.additionalNotes = additionalNotesResult.additionalNotes
-    }
-
-    if (updates.seatsTotal != null) {
-      updateData.seatsTotal = updates.seatsTotal
-      // Adjust seatsAvailable proportionally
-      const delta = updates.seatsTotal - ride.seatsTotal
-      let newSeatsAvailable = ride.seatsAvailable + delta
-      // Clamp between 0 and updates.seatsTotal
-      newSeatsAvailable = Math.max(
-        0,
-        Math.min(newSeatsAvailable, updates.seatsTotal)
-      )
-      updateData.seatsAvailable = newSeatsAvailable
-    }
-
-    const updatedRide = await prisma.ride.update({
-      where: { id },
-      data: updateData,
-    })
-
-    const activeBookings = await prisma.booking.findMany({
-      where: {
-        rideId: updatedRide.id,
-        status: { in: [...ACTIVE_BOOKING_NOTIFICATION_STATUSES] },
-      },
-      select: {
-        passengerId: true,
-      },
-    })
-    const passengerIds = Array.from(
-      new Set(activeBookings.map((booking) => booking.passengerId))
-    )
-
-    if (passengerIds.length > 0) {
-      await notifyUsersByIds({
-        userIds: passengerIds,
-        title: "Ride updated",
-        body: `${updatedRide.fromCity} → ${updatedRide.toCity} details were updated`,
-        type: "ride_update",
-        data: {
-          rideId: updatedRide.id,
-          kind: "ride_updated",
-        },
+    if (scope !== "occurrence" && !isRecurringRide(ride)) {
+      return res.status(400).json({
+        error: "Selected scope is only available for recurring rides",
       })
     }
 
-    return res.json(attachRideTiming(updatedRide))
+    const scopedRides = await getScopedRideOccurrences(ride, scope)
+    if (scopedRides.length === 0) {
+      return res.status(404).json({ error: "Ride not found" })
+    }
+
+    const scopedUpdates = scopedRides.map((targetRide) =>
+      buildScopedRideUpdateData({
+        targetRide,
+        baseRide: ride,
+        updates,
+        baseUpdatedStartTime: effectiveStartTime,
+        explicitArrivalDurationMs,
+      })
+    )
+
+    const scopedError = scopedUpdates.find((result) => "error" in result)
+    if (scopedError && "error" in scopedError) {
+      return res.status(400).json({ error: scopedError.error })
+    }
+
+    const updatedRides = await prisma.$transaction(
+      scopedRides.map((targetRide, index) =>
+        prisma.ride.update({
+          where: { id: targetRide.id },
+          data: (scopedUpdates[index] as { updateData: Record<string, unknown> })
+            .updateData,
+        })
+      )
+    )
+
+    const activeBookings = await prisma.booking.findMany({
+      where: {
+        rideId: { in: updatedRides.map((targetRide) => targetRide.id) },
+        status: { in: [...ACTIVE_BOOKING_NOTIFICATION_STATUSES] },
+      },
+      select: {
+        rideId: true,
+        passengerId: true,
+      },
+    })
+
+    if (activeBookings.length > 0) {
+      const rideMap = new Map(updatedRides.map((targetRide) => [targetRide.id, targetRide]))
+      await Promise.all(
+        activeBookings.map((booking) => {
+          const updatedRide = rideMap.get(booking.rideId)
+          if (!updatedRide) return Promise.resolve()
+          return notifyUser({
+            userId: booking.passengerId,
+            title: "Ride updated",
+            body: `${updatedRide.fromCity} → ${updatedRide.toCity} details were updated`,
+            type: "ride_update",
+            data: {
+              rideId: updatedRide.id,
+              kind: "ride_updated",
+              scope,
+            },
+          })
+        })
+      )
+    }
+
+    const updatedRide = updatedRides[0]
+    return res.json({
+      ...attachRideTiming(updatedRide),
+      scope,
+      updatedCount: updatedRides.length,
+      updatedRideIds: updatedRides.map((targetRide) => targetRide.id),
+    })
   } catch (err) {
     console.error("PATCH /api/rides/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -1274,7 +1435,28 @@ export async function cancelRide(req: AuthRequest, res: Response) {
       return res.status(403).json({ error: "Forbidden" })
     }
 
-    if (!["open", "ongoing"].includes(ride.status)) {
+    const scopeResult = parseRideEditScope(
+      (req.body as Partial<CreateRideBody> | undefined)?.scope ??
+        req.query.scope ??
+        null
+    )
+    if ("error" in scopeResult) {
+      return res.status(400).json({ error: scopeResult.error })
+    }
+    const scope = scopeResult.scope
+
+    if (scope !== "occurrence" && !isRecurringRide(ride)) {
+      return res.status(400).json({
+        error: "Selected scope is only available for recurring rides",
+      })
+    }
+
+    const scopedRides = await getScopedRideOccurrences(ride, scope)
+    const cancellableRides = scopedRides.filter((targetRide) =>
+      ["open", "ongoing"].includes(targetRide.status)
+    )
+
+    if (cancellableRides.length === 0) {
       return res
         .status(400)
         .json({ error: "Only open or ongoing rides can be cancelled" })
@@ -1282,13 +1464,14 @@ export async function cancelRide(req: AuthRequest, res: Response) {
 
     const bookings = await prisma.booking.findMany({
       where: {
-        rideId: id,
+        rideId: { in: cancellableRides.map((targetRide) => targetRide.id) },
         status: {
           in: ["pending", "confirmed", "ACCEPTED", "PAYMENT_PENDING", "CONFIRMED"],
         },
       },
       select: {
         id: true,
+        rideId: true,
         passengerId: true,
         status: true,
         paymentStatus: true,
@@ -1322,13 +1505,13 @@ export async function cancelRide(req: AuthRequest, res: Response) {
     }
 
     const [updatedRide, updatedBookings] = await prisma.$transaction([
-      prisma.ride.update({
-        where: { id },
+      prisma.ride.updateMany({
+        where: { id: { in: cancellableRides.map((targetRide) => targetRide.id) } },
         data: { status: "cancelled" },
       }),
       prisma.booking.updateMany({
         where: {
-          rideId: id,
+          rideId: { in: cancellableRides.map((targetRide) => targetRide.id) },
           status: {
             in: [
               "pending",
@@ -1351,15 +1534,22 @@ export async function cancelRide(req: AuthRequest, res: Response) {
           body: `${ride.fromCity} → ${ride.toCity} was cancelled by the driver`,
           type: "ride_update",
           data: {
-            rideId: ride.id,
+            rideId: booking.rideId,
             bookingId: booking.id,
             kind: "ride_cancelled_by_driver",
+            scope,
           },
         })
       )
     )
 
-    return res.json({ ride: updatedRide, bookings: updatedBookings })
+    return res.json({
+      ride: updatedRide,
+      bookings: updatedBookings,
+      scope,
+      updatedCount: cancellableRides.length,
+      updatedRideIds: cancellableRides.map((targetRide) => targetRide.id),
+    })
   } catch (err) {
     console.error("POST /api/rides/:id/cancel error", err)
     return res.status(500).json({ error: "Internal server error" })
