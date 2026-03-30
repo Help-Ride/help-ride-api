@@ -8,6 +8,7 @@ import { initiateRideRequestRefund } from "../lib/refunds.js"
 import { getPlatformFeePct, stripe } from "../lib/stripe.js"
 import { notifyNearbyDriversForRideRequest } from "../lib/nearbyDriverNotifications.js"
 import { notifyUser, notifyUsersByIds } from "../lib/notifications.js"
+import { createPaymentSheetCustomerContext } from "../lib/stripeCustomer.js"
 import {
   dispatchRideRequest,
   dispatchRideRequestCancel,
@@ -495,12 +496,15 @@ export async function createJitRideRequestPaymentIntent(
       currency: "cad",
       metadata,
     })
+    const customerContext = await createPaymentSheetCustomerContext(req.userId)
 
     const paymentIntent = await stripe.paymentIntents.create(
       {
         amount: amountCents,
         currency: "cad",
+        customer: customerContext.customerId,
         automatic_payment_methods: { enabled: true },
+        setup_future_usage: "on_session",
         metadata,
       },
       { idempotencyKey }
@@ -515,6 +519,8 @@ export async function createJitRideRequestPaymentIntent(
       paymentIntentId: paymentIntent.id,
       amount: paymentIntent.amount,
       currency: paymentIntent.currency,
+      customerId: customerContext.customerId,
+      customerEphemeralKeySecret: customerContext.customerEphemeralKeySecret,
       quotedPricePerSeat: pricing.pricePerSeat,
       requestMode: "JIT",
     })

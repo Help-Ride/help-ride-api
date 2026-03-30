@@ -132,6 +132,7 @@ model User {
   lastLoginAt               DateTime?
   accountStatus             AccountStatus    @default(active)
   stripeAccountId           String?          @unique
+  stripeCustomerId          String?          @unique
   deletedAt                 DateTime?
 
   emailVerifyOtp            String?

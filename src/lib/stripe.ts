@@ -1,13 +1,14 @@
 import Stripe from "stripe"
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY
+export const STRIPE_API_VERSION = "2024-06-20"
 
 if (!stripeSecretKey) {
   throw new Error("STRIPE_SECRET_KEY is not set")
 }
 
 export const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: "2024-06-20",
+  apiVersion: STRIPE_API_VERSION,
 })
 
 export function getStripeWebhookSecret() {

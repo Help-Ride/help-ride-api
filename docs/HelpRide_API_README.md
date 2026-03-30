@@ -1104,7 +1104,27 @@ Response:
 
 Current flow:
 - Passenger card payments are collected into the HelpRide Stripe platform account.
+- Passengers are backed by Stripe Customers so cards can be saved and reused in future checkouts.
 - Driver payouts are sent using Stripe Connect `transfer` from the platform balance.
+
+### Create SetupIntent (Save Payment Method)
+
+`POST /payments/setup-intent`
+
+Response:
+
+```json
+{
+  "setupIntentClientSecret": "seti_..._secret_...",
+  "customerId": "cus_...",
+  "customerEphemeralKeySecret": "ek_..."
+}
+```
+
+Notes:
+- Creates or reuses a Stripe Customer for the authenticated passenger.
+- Used by the mobile app's payment-method management sheet.
+- Cards saved here are reusable in future PaymentSheet checkouts.
 
 ### Create PaymentIntent (Passenger)
 
@@ -1124,6 +1144,8 @@ Response:
   "paymentIntentId": "pi_...",
   "amount": 2200,
   "currency": "cad",
+  "customerId": "cus_...",
+  "customerEphemeralKeySecret": "ek_...",
   "helpRideFeeCents": 330,
   "driverEarningsCents": 1870
 }
@@ -1133,6 +1155,7 @@ Notes:
 - Booking must be `ACCEPTED`.
 - Amount is computed server-side (distance/seat-based pricing model) and never accepted from client input.
 - If a booking already has a `stripePaymentIntentId`, the existing intent is reused (idempotency).
+- PaymentIntents are attached to the authenticated passenger's Stripe Customer with `setup_future_usage=on_session`, so saved cards can be reused in later checkouts.
 - Booking transitions to `PAYMENT_PENDING` after intent creation/reuse.
 - Funds are collected into the HelpRide Stripe account; driver payout is a separate transfer step.
 

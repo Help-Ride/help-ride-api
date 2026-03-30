@@ -23,7 +23,6 @@ type RidePricingConfig = {
   perMinuteRate: number
   minimumSeatPrice: number
   ontimeMarkupMultiplier: number
-  maxSharedSeatDivisor: number
   assumedAverageSpeedKmh: number
   minimumDurationMinutes: number
 }
@@ -128,10 +127,6 @@ function getRidePricingConfig(): RidePricingConfig {
       "RIDE_PRICING_ONTIME_MULTIPLIER",
       1.18
     ),
-    maxSharedSeatDivisor: getPositiveNumberEnv(
-      "RIDE_PRICING_MAX_SHARED_DIVISOR",
-      2.2
-    ),
     assumedAverageSpeedKmh: getPositiveNumberEnv(
       "RIDE_PRICING_ASSUMED_SPEED_KMH",
       30
@@ -198,7 +193,7 @@ export async function resolveSeatPrice({
     estimateDurationMinutes(distanceKm, config.assumedAverageSpeedKmh)
   )
   const sharedSeatDivisor =
-    seats <= 1 ? 1 : Math.min(seats, config.maxSharedSeatDivisor)
+    Number.isFinite(seats) && seats > 1 ? Math.floor(seats) : 1
 
   let estimatedTripTotal =
     config.baseFare +

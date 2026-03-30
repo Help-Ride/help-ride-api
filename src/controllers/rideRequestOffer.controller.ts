@@ -327,7 +327,15 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Ride is not open for booking" })
     }
 
-    if (offer.ride.seatsAvailable < offer.seatsOffered) {
+    if (offer.seatsOffered < offer.rideRequest.seatsNeeded) {
+      return res.status(400).json({
+        error: "Offer no longer satisfies the requested seat count",
+      })
+    }
+
+    const acceptedSeats = offer.rideRequest.seatsNeeded
+
+    if (offer.ride.seatsAvailable < acceptedSeats) {
       return res.status(400).json({ error: "Not enough seats available" })
     }
 
@@ -365,7 +373,7 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
         data: {
           rideId: offer.ride.id,
           passengerId: offer.rideRequest.passengerId,
-          seatsBooked: offer.seatsOffered,
+          seatsBooked: acceptedSeats,
           status: "ACCEPTED",
         },
         include: {
@@ -400,9 +408,9 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       prisma.ride.update({
         where: { id: offer.ride.id },
         data: {
-          seatsAvailable: offer.ride.seatsAvailable - offer.seatsOffered,
+          seatsAvailable: offer.ride.seatsAvailable - acceptedSeats,
           status:
-            offer.ride.seatsAvailable - offer.seatsOffered <= 0
+            offer.ride.seatsAvailable - acceptedSeats <= 0
               ? "open"
               : offer.ride.status,
         },
