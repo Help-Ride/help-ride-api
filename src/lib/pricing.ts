@@ -116,20 +116,21 @@ function getNonNegativeNumberEnv(name: string, fallback: number) {
 
 function getRidePricingConfig(): RidePricingConfig {
   return {
-    baseFare: getNonNegativeNumberEnv("RIDE_PRICING_BASE_FARE", 4.25),
-    perKmRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_KM_RATE", 0.78),
-    perMinuteRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_MIN_RATE", 0.22),
+    // Shared rides should price meaningfully below private taxi/rideshare trips.
+    baseFare: getNonNegativeNumberEnv("RIDE_PRICING_BASE_FARE", 4.0),
+    perKmRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_KM_RATE", 0.6),
+    perMinuteRate: getNonNegativeNumberEnv("RIDE_PRICING_PER_MIN_RATE", 0.08),
     minimumSeatPrice: getNonNegativeNumberEnv(
       "RIDE_PRICING_MIN_SEAT_PRICE",
-      8
+      6
     ),
     ontimeMarkupMultiplier: getPositiveNumberEnv(
       "RIDE_PRICING_ONTIME_MULTIPLIER",
-      1.18
+      1.12
     ),
     assumedAverageSpeedKmh: getPositiveNumberEnv(
       "RIDE_PRICING_ASSUMED_SPEED_KMH",
-      30
+      60
     ),
     minimumDurationMinutes: getPositiveNumberEnv(
       "RIDE_PRICING_MIN_DURATION_MINUTES",

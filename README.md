@@ -139,11 +139,22 @@ REALTIME_TO_API_SECRET="rts_xxx"
 # Must match realtime service JWT verification secret:
 # JWT_ACCESS_SECRET="same-value-used-by-realtime-service"
 
-# Optional pricing model overrides (cents / basis points)
-PAYMENT_BASE_FARE_CENTS=0
-PAYMENT_PER_KM_RATE_CENTS=0
-PAYMENT_SERVICE_FEE_CENTS=0
-PAYMENT_TAX_BPS=0
+# Checkout pricing uses the advertised ride price:
+# charged amount = pricePerSeat x seats booked
+# Legacy surcharge vars are intentionally unused for booking payments.
+# PAYMENT_BASE_FARE_CENTS=0
+# PAYMENT_PER_KM_RATE_CENTS=0
+# PAYMENT_SERVICE_FEE_CENTS=0
+# PAYMENT_TAX_BPS=0
+
+# Optional ride-posting market floor tuning (shared-ride defaults)
+# RIDE_PRICING_BASE_FARE=4.0
+# RIDE_PRICING_PER_KM_RATE=0.6
+# RIDE_PRICING_PER_MIN_RATE=0.08
+# RIDE_PRICING_MIN_SEAT_PRICE=6
+# RIDE_PRICING_ONTIME_MULTIPLIER=1.12
+# RIDE_PRICING_ASSUMED_SPEED_KMH=60
+# RIDE_PRICING_MIN_DURATION_MINUTES=10
 
 # App
 NODE_ENV="development"        # or "production"
@@ -504,12 +515,15 @@ Used on routes like `/rides`, `/bookings`, `/ride-requests`, `/drivers` (POST).
 ```json
 {
   "name": "Updated Name",
+  "email": "updated@example.com",
   "phone": "+14165551234",
   "providerAvatarUrl": "https://example.com/avatar.png"
 }
 ```
 
 - Partial update of the current user's profile.
+- If `email` or `phone` changes, the new value is stored as pending until OTP verification succeeds.
+- The currently active verified email/phone remains unchanged until the pending value is verified.
 
 ### Upload Profile Photo (Presign)
 
@@ -636,6 +650,7 @@ Single-car model for now (one `DriverProfile` per `User`).
 - Validates coordinates, start time, seat/price values, and optional fields.
 - Ensures `arrivalTime > startTime` when provided.
 - Initializes `seatsAvailable = seatsTotal` and `status = "open"`.
+- After `5` completed driver rides, creating another ride requires Stripe Connect setup plus an uploaded vehicle registration/ownership document. The API returns `403` with code `DRIVER_COMPLIANCE_REQUIRED` when those deferred requirements are missing.
 
 ### Search Rides (Public)
 
@@ -942,13 +957,15 @@ Passenger ↔ driver chat scoped to a ride, with realtime delivery via Pusher.
 ```json
 {
   "name": "Updated Name",
+  "email": "updated@example.com",
   "phone": "+1-226-000-0000",
   "providerAvatarUrl": "https://example.com/new-avatar.png"
 }
 ```
 
 - Allows the user to update their own basic profile fields.
-- Does **not** allow changing email, roles, or verification flags.
+- If `email` changes, `emailVerified` is cleared until the new address is verified.
+- Does **not** allow changing roles or verification flags directly.
 
 ---
 

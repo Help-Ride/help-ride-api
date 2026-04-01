@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import { getDeferredDriverComplianceState } from "../lib/driverCompliance.js"
 import { classifyRideTimingByDeparture, resolveSeatPrice } from "../lib/pricing.js"
 import { notifyUser, notifyUsersByIds, notifyUsersByRole } from "../lib/notifications.js"
 import { initiateBookingRefundIfPaid } from "../lib/refunds.js"
@@ -551,6 +552,23 @@ export async function createRide(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Unauthorized" })
     }
     const driverId = req.userId
+
+    const complianceState = await getDeferredDriverComplianceState(driverId)
+    if (
+      complianceState.enforcementRequired &&
+      complianceState.missingRequirements.length > 0
+    ) {
+      return res.status(403).json({
+        error:
+          "Complete Stripe setup and upload vehicle registration before creating more rides.",
+        code: "DRIVER_COMPLIANCE_REQUIRED",
+        message:
+          "After 5 completed rides, Stripe setup and vehicle registration are required before you can publish new rides.",
+        completedRides: complianceState.completedRides,
+        threshold: complianceState.threshold,
+        missingRequirements: complianceState.missingRequirements,
+      })
+    }
 
     const {
       fromCity,

@@ -423,6 +423,8 @@ async function buildAuthResponse(user: {
   name: string
   email: string | null
   phone: string | null
+  pendingEmail?: string | null
+  pendingPhone?: string | null
   phoneVerified: boolean
   emailVerified: boolean
   phoneVerifiedAt?: Date | null
@@ -461,6 +463,8 @@ async function buildAuthResponse(user: {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      pendingEmail: user.pendingEmail ?? null,
+      pendingPhone: user.pendingPhone ?? null,
       phoneVerified: user.phoneVerified,
       emailVerified: user.emailVerified,
       phoneVerifiedAt: user.phoneVerifiedAt ?? null,
@@ -525,6 +529,22 @@ function generateAuthOtp() {
     expiresAt: new Date(now + AUTH_OTP_TTL_MS),
     resendAvailableAt: new Date(now + AUTH_OTP_RESEND_COOLDOWN_MS),
   }
+}
+
+async function findUserByEmailForVerification(email: string) {
+  return prisma.user.findFirst({
+    where: {
+      OR: [{ email }, { pendingEmail: email }],
+    },
+  })
+}
+
+async function findUserByPhoneForVerification(phone: string) {
+  return prisma.user.findFirst({
+    where: {
+      OR: [{ phone }, { pendingPhone: phone }],
+    },
+  })
 }
 
 async function findLatestAuthChallenge(
@@ -1848,6 +1868,8 @@ export async function getMe(req: AuthRequest, res: Response) {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      pendingEmail: user.pendingEmail,
+      pendingPhone: user.pendingPhone,
       phoneVerified: user.phoneVerified,
       emailVerified: user.emailVerified,
       phoneVerifiedAt: user.phoneVerifiedAt,
@@ -1985,15 +2007,13 @@ export async function logout(req: AuthRequest, res: Response) {
  */
 export async function sendEmailVerifyOtp(req: AuthRequest, res: Response) {
   try {
-    const { email } = (req.body ?? {}) as { email?: string }
+    const normalizedEmail = normalizeEmail((req.body ?? {})?.email)
 
-    if (!email) {
+    if (!normalizedEmail) {
       return res.status(400).json({ error: "email is required" })
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-    })
+    const user = await findUserByEmailForVerification(normalizedEmail)
 
     if (!user) {
       // Don't leak existence
@@ -2014,7 +2034,10 @@ export async function sendEmailVerifyOtp(req: AuthRequest, res: Response) {
     })
 
     await sendEmailVerificationOtp({
-      email: updated.email ?? email ?? "",
+      email:
+        updated.pendingEmail === normalizedEmail
+          ? updated.pendingEmail
+          : (updated.email ?? normalizedEmail),
       name: updated.name,
       otp,
     })
@@ -2034,23 +2057,22 @@ export async function sendEmailVerifyOtp(req: AuthRequest, res: Response) {
  */
 export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
   try {
-    const { email, otp } = (req.body ?? {}) as {
-      email?: string
+    const { otp } = (req.body ?? {}) as {
       otp?: string
     }
+    const normalizedEmail = normalizeEmail((req.body ?? {})?.email)
 
-    if (!email || !otp) {
+    if (!normalizedEmail || !otp) {
       return res.status(400).json({ error: "email and otp are required" })
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-    })
-    console.log(email, otp, user)
+    const user = await findUserByEmailForVerification(normalizedEmail)
 
     if (!user) {
       return res.status(400).json({ error: "Invalid email or OTP" })
     }
+
+    const verifyingPendingEmail = user.pendingEmail === normalizedEmail
 
     if (
       !user.emailVerifyOtp ||
@@ -2070,7 +2092,9 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
       let emailSendFailed = false
       try {
         await sendEmailVerificationOtp({
-          email: user.email ?? email ?? "",
+          email: verifyingPendingEmail
+            ? (user.pendingEmail ?? normalizedEmail)
+            : (user.email ?? normalizedEmail),
           name: user.name,
           otp: newOtp,
         })
@@ -2114,8 +2138,14 @@ export async function verifyEmailWithOtp(req: AuthRequest, res: Response) {
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
+        ...(verifyingPendingEmail
+          ? {
+              email: normalizedEmail,
+              pendingEmail: null,
+            }
+          : {}),
         emailVerified: true,
-        emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+        emailVerifiedAt: new Date(),
         emailVerifyOtp: null,
         emailVerifyOtpExpiresAt: null,
         emailVerifyOtpAttempts: 0,
@@ -2145,9 +2175,7 @@ export async function sendPhoneVerifyOtp(req: AuthRequest, res: Response) {
     const { phone } = (req.body ?? {}) as Partial<SendPhoneOtpBody>
     const normalizedPhone = parsePhoneOrThrow(phone)
 
-    const user = await prisma.user.findUnique({
-      where: { phone: normalizedPhone },
-    })
+    const user = await findUserByPhoneForVerification(normalizedPhone)
 
     if (!user) {
       return res.status(200).json({
@@ -2166,7 +2194,10 @@ export async function sendPhoneVerifyOtp(req: AuthRequest, res: Response) {
     })
 
     await sendPhoneVerificationOtpSms({
-      phone: updated.phone ?? normalizedPhone,
+      phone:
+        updated.pendingPhone === normalizedPhone
+          ? updated.pendingPhone
+          : (updated.phone ?? normalizedPhone),
       name: updated.name,
       otp,
     })
@@ -2199,13 +2230,13 @@ export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "phone and otp are required" })
     }
 
-    const user = await prisma.user.findUnique({
-      where: { phone: normalizedPhone },
-    })
+    const user = await findUserByPhoneForVerification(normalizedPhone)
 
     if (!user) {
       return res.status(400).json({ error: "Invalid phone or OTP" })
     }
+
+    const verifyingPendingPhone = user.pendingPhone === normalizedPhone
 
     if (
       !user.phoneVerifyOtp ||
@@ -2225,7 +2256,9 @@ export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
       let smsSendFailed = false
       try {
         await sendPhoneVerificationOtpSms({
-          phone: user.phone ?? normalizedPhone,
+          phone: verifyingPendingPhone
+            ? (user.pendingPhone ?? normalizedPhone)
+            : (user.phone ?? normalizedPhone),
           name: user.name,
           otp: newOtp,
         })
@@ -2266,8 +2299,14 @@ export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
+        ...(verifyingPendingPhone
+          ? {
+              phone: normalizedPhone,
+              pendingPhone: null,
+            }
+          : {}),
         phoneVerified: true,
-        phoneVerifiedAt: user.phoneVerifiedAt ?? new Date(),
+        phoneVerifiedAt: new Date(),
         phoneVerifyOtp: null,
         phoneVerifyOtpExpiresAt: null,
         phoneVerifyOtpAttempts: 0,

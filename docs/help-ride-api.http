@@ -338,7 +338,8 @@ Accept: application/json
 ###
 
 ### UPDATE OWN USER PROFILE
-# If `phone` changes, `phoneVerified` is reset until the new number is verified.
+# If `email` or `phone` changes, the new value is stored as pending until OTP verification succeeds.
+# The active verified email/phone stays unchanged until verification completes.
 PUT {{baseUrl}}/users/{{userId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -399,6 +400,8 @@ Content-Type: application/json
 
 ###########################################
 ### 🚗 CREATE RIDE  (requires driver token)
+# After 5 completed driver rides, this can return 403 `DRIVER_COMPLIANCE_REQUIRED`
+# until Stripe Connect setup and ownership/registration upload are completed.
 ###########################################
 POST {{baseUrl}}/rides
 Authorization: Bearer {{accessToken}}
@@ -1101,6 +1104,9 @@ GET {{baseUrl}}/notifications?isRead=false&limit=50&cursor=
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
+# Response notification items may include:
+# "data": { "kind": "booking_request", "rideId": "...", "bookingId": "..." }
+
 ###
 
 ### REGISTER DEVICE TOKEN (FCM)
@@ -1167,6 +1173,7 @@ Content-Type: application/json
 
 {
   "name": "Updated Name",
+  "email": "updated@example.com",
   "phone": "+1-226-000-0000",
   "providerAvatarUrl": "https://example.com/new-avatar.png"
 }

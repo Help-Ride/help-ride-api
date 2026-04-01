@@ -448,6 +448,10 @@ the generated `occurrenceStartTimes` plus the shared recurrence metadata. If a
 client accidentally omits `rideType` but still sends recurrence metadata, the
 API treats the request as recurring instead of silently downgrading it. The API
 creates one ride row per occurrence and links them with `recurringSeriesId`.
+After `5` completed rides by the same driver, this endpoint also requires
+Stripe Connect setup plus an uploaded ownership/registration document. If those
+deferred compliance items are missing, the API returns `403` with code
+`DRIVER_COMPLIANCE_REQUIRED`.
 
 Response:
 
@@ -1153,7 +1157,7 @@ Response:
 
 Notes:
 - Booking must be `ACCEPTED`.
-- Amount is computed server-side (distance/seat-based pricing model) and never accepted from client input.
+- Amount is computed server-side from the accepted booking (`ride.pricePerSeat x seatsBooked`) and never accepted from client input.
 - If a booking already has a `stripePaymentIntentId`, the existing intent is reused (idempotency).
 - PaymentIntents are attached to the authenticated passenger's Stripe Customer with `setup_future_usage=on_session`, so saved cards can be reused in later checkouts.
 - Booking transitions to `PAYMENT_PENDING` after intent creation/reuse.
@@ -2309,6 +2313,11 @@ Response:
       "title": "Booking accepted",
       "body": "Waterloo → Toronto is accepted",
       "type": "ride_update",
+      "data": {
+        "kind": "booking_request",
+        "rideId": "ride-uuid",
+        "bookingId": "booking-uuid"
+      },
       "isRead": false,
       "createdAt": "2025-01-01T00:00:00.000Z"
     }
@@ -2463,9 +2472,9 @@ Response:
 }
 ```
 
-If the phone number changes, the backend clears `phoneVerified` and the user
-must verify the new number again before SMS ride alerts or SMS OTP login should
-be considered trusted.
+If the email or phone number changes, the backend keeps the current verified
+contact active and stores the replacement as pending until OTP verification
+succeeds. The new contact is only promoted after verification completes.
 
 ---
 

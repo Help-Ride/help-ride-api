@@ -119,6 +119,8 @@ model User {
   name                      String
   email                     String?          @unique
   phone                     String?          @unique
+  pendingEmail              String?          @unique
+  pendingPhone              String?          @unique
   passwordHash              String?
   roleDefault               RoleDefault      @default(passenger)
   providerAvatarUrl         String?
@@ -337,6 +339,7 @@ model Notification {
   title       String
   body        String
   type        NotificationType @default(system)
+  data        Json?
   isRead      Boolean          @default(false)
   createdAt   DateTime         @default(now())
 }
