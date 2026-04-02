@@ -3,6 +3,8 @@
 ################################################
 @baseUrl = http://localhost:4000/api
 # @baseUrl = https://dev-help-ride-api.vercel.app/api
+@publicBaseUrl = http://localhost:4000
+# @publicBaseUrl = https://dev-help-ride-api.vercel.app
 
 # App Review note:
 # Sign in with Apple is available on the login screen.
@@ -52,52 +54,84 @@ Accept: application/json
 ###
 
 ################################################
-### 🔐 AUTH – EMAIL/PASSWORD + OTP
+### 🔒 PUBLIC POLICY PAGES (PLAY CONSOLE)
+################################################
+GET {{publicBaseUrl}}/privacy
+Accept: text/html
+
+###
+
+GET {{publicBaseUrl}}/account-deletion
+Accept: text/html
+
+###
+
+################################################
+### 🔐 AUTH – PASSWORDLESS CONTINUE FLOW
 ################################################
 
-### REGISTER WITH EMAIL/PASSWORD
-# Phone is required for standard signup and SMS ride alerts.
-POST {{baseUrl}}/auth/register
+### START PHONE CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/phone
 Content-Type: application/json
 
 {
-  "name": "Email User",
+  "phone": "{{phone}}",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### VERIFY PHONE CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/phone/verify
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "otp": "112991",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### START EMAIL CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/email
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### VERIFY EMAIL CONTINUE FLOW
+POST {{baseUrl}}/auth/continue/email/verify
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "otp": "112991",
+  "deviceId": "ios-simulator-auth-device"
+}
+
+###
+
+### COMPLETE NEW-USER ONBOARDING
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+
+{
+  "onboardingToken": "onboardingToken",
+  "firstName": "Rishi",
+  "lastName": "Patel",
   "email": "{{email}}",
   "phone": "{{phone}}",
-  "password": "StrongPass123!"
+  "deviceId": "ios-simulator-auth-device"
 }
 
 ###
 
-### LOGIN WITH EMAIL/PASSWORD
-# Use same email/password as above.
-# Password login returns tokens immediately.
-# For passwordless sign-in, use the email or phone OTP endpoints below.
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
-
-{
-  "email": "{{email}}",
-  "password": "StrongPass123!"
-}
-
-###
-
-### LOGIN WITH LOCATION SNAPSHOT (OPTIONAL)
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
-
-{
-  "email": "{{email}}",
-  "password": "StrongPass123!",
-  "lat": 43.4643,
-  "lng": -80.5204,
-  "accuracyMeters": 15
-}
-
-###
-
-# Set from login/register/oauth response
+# Set from continue/onboarding/oauth response
 @refreshToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YzUyMDc2ZS03YzE0LTRhYjQtODJjOS0yNDdjNzdlNmQ1ZGUiLCJyb2xlRGVmYXVsdCI6InBhc3NlbmdlciIsImlhdCI6MTc2OTQxMDI0MCwiZXhwIjoxNzcwMDE1MDQwLCJqdGkiOiI5MjMxNTgzMi04ZTRjLTRkNDYtOGU1Ni0xMjk2YTFmYjAyZDEifQ.5S-Vr3yo6D2X5p8kirJAo_1Mk2187vk95eQLQdV9jT4
 
 ### REFRESH TOKENS
@@ -120,8 +154,33 @@ Content-Type: application/json
 
 ###
 
+### LEGACY REGISTER WITH EMAIL/PASSWORD (TEMPORARY MIGRATION ONLY)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Email User",
+  "email": "{{email}}",
+  "phone": "{{phone}}",
+  "password": "StrongPass123!"
+}
+
+###
+
+### LEGACY LOGIN WITH EMAIL/PASSWORD (TEMPORARY MIGRATION ONLY)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "StrongPass123!"
+}
+
+###
+
 ### RESEND EMAIL VERIFICATION OTP
-# Can also be used as a passwordless email sign-in step.
+# Use `/auth/continue/email` from the new mobile auth entry flow when you
+# want unified sign-in + sign-up behavior.
 POST {{baseUrl}}/auth/verify-email/send-otp
 Content-Type: application/json
 
@@ -145,7 +204,8 @@ Content-Type: application/json
 ###
 
 ### SEND PHONE VERIFICATION OTP (SMS)
-# Can also be used as a passwordless SMS sign-in step.
+# Use `/auth/login-phone/send-otp` from the login screen when you need
+# a missing-account response instead of the generic verification flow.
 POST {{baseUrl}}/auth/verify-phone/send-otp
 Content-Type: application/json
 
@@ -278,7 +338,8 @@ Accept: application/json
 ###
 
 ### UPDATE OWN USER PROFILE
-# If `phone` changes, `phoneVerified` is reset until the new number is verified.
+# If `email` or `phone` changes, the new value is stored as pending until OTP verification succeeds.
+# The active verified email/phone stays unchanged until verification completes.
 PUT {{baseUrl}}/users/{{userId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -339,6 +400,8 @@ Content-Type: application/json
 
 ###########################################
 ### 🚗 CREATE RIDE  (requires driver token)
+# After 5 completed driver rides, this can return 403 `DRIVER_COMPLIANCE_REQUIRED`
+# until Stripe Connect setup and ownership/registration upload are completed.
 ###########################################
 POST {{baseUrl}}/rides
 Authorization: Bearer {{accessToken}}
@@ -373,6 +436,10 @@ Content-Type: application/json
 ###########################################
 ### ✏️ UPDATE RIDE (driver only)
 # `pricePerSeat` is locked after ride creation and should not be sent here.
+# For recurring rides, `scope` can be:
+# - `occurrence` (default): only this ride row
+# - `future`: this occurrence and all future rides in the same recurring series
+# - `series`: every occurrence in the same recurring series
 ###########################################
 PUT {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
@@ -390,7 +457,8 @@ Content-Type: application/json
   "stops": ["Downtown", "Union Station"],
   "amenities": ["wifi", "pet_friendly"],
   "additionalNotes": "Luggage space available",
-  "seatsTotal": 1
+  "seatsTotal": 1,
+  "scope": "occurrence"
 }
 
 ###
@@ -442,6 +510,9 @@ Content-Type: application/json
 
 ### GET MY RIDES  (driver only)
 # Response includes `rideTiming`: PREBOOKED | ONTIME | STANDARD
+# Recurring rides are still returned as one row per occurrence and linked by
+# `recurringSeriesId`. Driver/admin UIs can group these rows into one recurring
+# series card while keeping occurrence-level booking and status control.
 GET {{baseUrl}}/rides/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -462,6 +533,10 @@ Accept: application/json
 
 ### UPDATE RIDE (driver only)
 # `pricePerSeat` is locked after ride creation and should not be sent here.
+# For recurring rides, `scope` can be:
+# - `occurrence` (default)
+# - `future`
+# - `series`
 PUT {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -478,12 +553,16 @@ Content-Type: application/json
   "stops": ["Union Station"],
   "amenities": ["wifi", "child_seat"],
   "additionalNotes": "One small luggage allowed",
-  "seatsTotal": 4
+  "seatsTotal": 4,
+  "scope": "future"
 }
 
 ###
 
-### DELETE / CANCEL RIDE (driver only)
+### DELETE RIDE (driver only, hard delete)
+# Keep using `/rides/:id/cancel` for driver/admin operational cancellation,
+# especially for recurring occurrences. `DELETE /rides/:id` permanently removes
+# the ride row.
 DELETE {{baseUrl}}/rides/{{rideId}}
 Authorization: Bearer {{accessToken}}
 
@@ -522,12 +601,17 @@ Accept: application/json
 
 ### CANCEL RIDE (with reason)
 # Refund is initiated for all paid confirmed bookings.
+# For recurring rides, `scope` can be:
+# - `occurrence` (default)
+# - `future`
+# - `series`
 POST {{baseUrl}}/rides/{{rideId}}/cancel
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "reason": "Driver unavailable"
+  "reason": "Driver unavailable",
+  "scope": "occurrence"
 }
 
 ###
@@ -539,7 +623,8 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "reason": "Driver unavailable"
+  "reason": "Driver unavailable",
+  "scope": "series"
 }
 
 ###
@@ -610,7 +695,8 @@ Accept: application/json
 ###
 
 ### PASSENGER: CANCEL BOOKING
-# If booking was paid, refund is initiated automatically.
+# If booking was paid, refund is initiated automatically only when cancelling
+# more than 2 hours before departure. Within 2 hours, no refund is issued.
 POST {{baseUrl}}/bookings/{{bookingId}}/cancel
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -618,7 +704,8 @@ Accept: application/json
 ###
 
 ### PASSENGER: CANCEL BOOKING (PUT alias)
-# If booking was paid, refund is initiated automatically.
+# If booking was paid, refund is initiated automatically only when cancelling
+# more than 2 hours before departure. Within 2 hours, no refund is issued.
 PUT {{baseUrl}}/bookings/{{bookingId}}/cancel
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -626,7 +713,8 @@ Accept: application/json
 ###
 
 ### PASSENGER: CANCEL BOOKING (DELETE alias)
-# If booking was paid, refund is initiated automatically.
+# If booking was paid, refund is initiated automatically only when cancelling
+# more than 2 hours before departure. Within 2 hours, no refund is issued.
 DELETE {{baseUrl}}/bookings/{{bookingId}}
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -646,6 +734,8 @@ Accept: application/json
 ################################################
 
 ### CREATE / GET CONVERSATION (PASSENGER)
+# Requires a paid/succeeded booking for this ride + passenger pair.
+# Otherwise returns 403 with code CHAT_PAYMENT_REQUIRED.
 POST {{baseUrl}}/chat/conversations
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -657,6 +747,8 @@ Content-Type: application/json
 ###
 
 ### CREATE / GET CONVERSATION (DRIVER)
+# Requires a paid/succeeded booking for this ride + passenger pair.
+# Otherwise returns 403 with code CHAT_PAYMENT_REQUIRED.
 POST {{baseUrl}}/chat/conversations
 Authorization: Bearer {{driverAccessToken}}
 Content-Type: application/json
@@ -679,6 +771,7 @@ Accept: application/json
 # - tripTime / tripTimeLabel
 # - rideStatus
 # - ridePricePerSeat
+# - blockedByMe / blockedByOtherUser / paymentRequired / chatDisabled
 # - nested ride object
 
 ###
@@ -711,6 +804,20 @@ Content-Type: application/json
 
 ###
 
+### BLOCK CHAT USER
+POST {{baseUrl}}/chat/users/{{driverId}}/block
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### UNBLOCK CHAT USER
+DELETE {{baseUrl}}/chat/users/{{driverId}}/block
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 ### PUSHER AUTH (PRIVATE CHANNEL)
 POST {{baseUrl}}/chat/pusher/auth
 Authorization: Bearer {{accessToken}}
@@ -739,9 +846,7 @@ Content-Type: application/json
   "carModel": "Corolla",
   "carYear": "2020",
   "carColor": "White",
-  "plateNumber": "ABC-123",
-  "licenseNumber": "LIC-987654",
-  "insuranceInfo": "Intact Insurance - Policy #123456"
+  "plateNumber": "ABC-123"
 }
 
 ###
@@ -819,7 +924,10 @@ Accept: application/json
 ################################################
 
 ### CREATE JIT PAYMENT INTENT (PASSENGER, <= 2 HOURS TO DEPARTURE)
-# On successful payment webhook, ride request is created and nearby drivers are notified.
+# On successful payment webhook, ride request is created, paid JIT state is persisted,
+# and nearby drivers are notified.
+# If no driver is matched before the JIT timeout/departure, the request auto-expires
+# and Stripe refund is initiated.
 POST {{baseUrl}}/ride-requests/jit/intent
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -877,6 +985,8 @@ Accept: application/json
 ###
 
 ### MY RIDE REQUESTS (PASSENGER)
+# Touching ride-request endpoints also sweeps stale JIT requests so unmatched paid
+# requests move to EXPIRED and refund flow is triggered if needed.
 GET {{baseUrl}}/ride-requests/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -1000,6 +1110,9 @@ GET {{baseUrl}}/notifications?isRead=false&limit=50&cursor=
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
+# Response notification items may include:
+# "data": { "kind": "booking_request", "rideId": "...", "bookingId": "..." }
+
 ###
 
 ### REGISTER DEVICE TOKEN (FCM)
@@ -1066,6 +1179,7 @@ Content-Type: application/json
 
 {
   "name": "Updated Name",
+  "email": "updated@example.com",
   "phone": "+1-226-000-0000",
   "providerAvatarUrl": "https://example.com/new-avatar.png"
 }
@@ -1164,6 +1278,14 @@ Content-Type: application/json
 
 ###
 
+# Creates a SetupIntent + CustomerSheet context for adding/removing saved cards.
+### CREATE PAYMENT SETUP INTENT (Passenger)
+POST {{baseUrl}}/payments/setup-intent
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
 # Set from payment intent response
 @paymentIntentId =
 
@@ -1217,6 +1339,8 @@ Accept: application/json
 ###
 
 ### STRIPE CONNECT RETURN (PUBLIC REDIRECT ENDPOINT)
+# If STRIPE_CONNECT_APP_RETURN_URL is set, browser requests will be redirected
+# back into the app, for example `helpride://stripe/return?...`.
 GET {{baseUrl}}/stripe/connect/return?state={{connectState}}&format=json
 Accept: application/json
 

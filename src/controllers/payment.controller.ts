@@ -5,6 +5,10 @@ import type { AuthRequest } from "../middleware/auth.js"
 import { calculateBookingFareCents } from "../lib/payments.js"
 import { getPlatformFeePct, stripe } from "../lib/stripe.js"
 import { notifyUser } from "../lib/notifications.js"
+import {
+  createPaymentSheetCustomerContext,
+  extractCustomerId,
+} from "../lib/stripeCustomer.js"
 
 interface CreatePaymentIntentBody {
   bookingId?: string
@@ -88,6 +92,41 @@ async function notifyDriverPaymentPending(payload: {
       kind: "booking_payment_pending",
     },
   })
+}
+
+/**
+ * POST /api/payments/setup-intent
+ * Creates a SetupIntent and CustomerSheet context so the passenger can save cards.
+ */
+export async function createSetupIntent(req: AuthRequest, res: Response) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    const customerContext = await createPaymentSheetCustomerContext(req.userId)
+    const setupIntent = await stripe.setupIntents.create({
+      customer: customerContext.customerId,
+      usage: "on_session",
+      payment_method_types: ["card"],
+      metadata: {
+        userId: req.userId,
+      },
+    })
+
+    if (!setupIntent.client_secret) {
+      return res.status(500).json({ error: "Setup intent missing client secret" })
+    }
+
+    return res.json({
+      setupIntentClientSecret: setupIntent.client_secret,
+      customerId: customerContext.customerId,
+      customerEphemeralKeySecret: customerContext.customerEphemeralKeySecret,
+    })
+  } catch (err) {
+    console.error("POST /payments/setup-intent error", err)
+    return res.status(500).json({ error: "Internal server error" })
+  }
 }
 
 /**
@@ -184,11 +223,44 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid platform fee" })
     }
 
+    const customerContext = await createPaymentSheetCustomerContext(req.userId)
+
     if (booking.stripePaymentIntentId) {
       try {
-        const existingIntent = await stripe.paymentIntents.retrieve(
+        let existingIntent = await stripe.paymentIntents.retrieve(
           booking.stripePaymentIntentId
         )
+        const existingCustomerId = extractCustomerId(existingIntent.customer)
+
+        if (
+          existingCustomerId == null ||
+          existingCustomerId === customerContext.customerId
+        ) {
+          const shouldSyncSavedPaymentContext =
+            existingCustomerId == null ||
+            existingIntent.setup_future_usage == null
+
+          if (shouldSyncSavedPaymentContext) {
+            existingIntent = await stripe.paymentIntents.update(
+              existingIntent.id,
+              {
+                customer: customerContext.customerId,
+                setup_future_usage: "on_session",
+              }
+            )
+          }
+        } else {
+          console.warn(
+            "[payments] Existing payment intent belongs to a different customer, creating a new one",
+            JSON.stringify({
+              bookingId: booking.id,
+              paymentIntentId: existingIntent.id,
+              existingCustomerId,
+              expectedCustomerId: customerContext.customerId,
+            })
+          )
+          throw new Error("Payment intent customer mismatch")
+        }
 
         if (existingIntent.status !== "canceled") {
           const existingAmountCents = existingIntent.amount ?? fareCents
@@ -244,6 +316,9 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
             paymentIntentId: existingIntent.id,
             amount: existingAmountCents,
             currency: existingIntent.currency ?? CURRENCY,
+            customerId: customerContext.customerId,
+            customerEphemeralKeySecret:
+              customerContext.customerEphemeralKeySecret,
             helpRideFeeCents: existingPlatformFeeCents,
             driverEarningsCents: existingAmountCents - existingPlatformFeeCents,
           })
@@ -263,7 +338,9 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: fareCents,
       currency: CURRENCY,
+      customer: customerContext.customerId,
       automatic_payment_methods: { enabled: true },
+      setup_future_usage: "on_session",
       metadata: {
         bookingId: booking.id,
         passengerId: booking.passengerId,
@@ -278,7 +355,7 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
         driverEarningsCents: String(driverEarningsCents),
       },
     }, {
-      idempotencyKey: `booking:${booking.id}:intent`,
+      idempotencyKey: `booking:${booking.id}:intent:v2`,
     })
 
     if (!paymentIntent.client_secret) {
@@ -326,6 +403,8 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       paymentIntentId: paymentIntent.id,
       amount: paymentIntent.amount,
       currency: paymentIntent.currency,
+      customerId: customerContext.customerId,
+      customerEphemeralKeySecret: customerContext.customerEphemeralKeySecret,
       helpRideFeeCents: platformFeeCents,
       driverEarningsCents,
     })

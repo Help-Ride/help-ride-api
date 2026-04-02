@@ -15,6 +15,7 @@ import { isValidE164Phone, normalizePhoneNumber } from "../lib/twilio.js"
 
 interface UpdateUserBody {
   name?: string
+  email?: string
   phone?: string
   providerAvatarUrl?: string
 }
@@ -104,6 +105,12 @@ function parseNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase()
 }
 
 function isValidLatitude(value: number) {
@@ -288,23 +295,38 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
       })
     }
 
-    const { name, phone, providerAvatarUrl } = (req.body ??
+    const { name, email, phone, providerAvatarUrl } = (req.body ??
       {}) as UpdateUserBody
 
-    if (!name && !phone && !providerAvatarUrl) {
+    if (!name && !email && !phone && !providerAvatarUrl) {
       return res.status(400).json({
         error:
-          "At least one field (name, phone, providerAvatarUrl) is required",
+          "At least one field (name, email, phone, providerAvatarUrl) is required",
       })
     }
 
     const existingUser = await prisma.user.findUnique({
       where: { id },
-      select: { phone: true },
+      select: {
+        email: true,
+        phone: true,
+        pendingEmail: true,
+        pendingPhone: true,
+      },
     })
 
     if (!existingUser) {
       return res.status(404).json({ error: "User not found" })
+    }
+
+    let normalizedEmail: string | undefined
+    if (email !== undefined) {
+      normalizedEmail = normalizeEmail(email)
+      if (!EMAIL_REGEX.test(normalizedEmail)) {
+        return res.status(400).json({
+          error: "email must be a valid email address",
+        })
+      }
     }
 
     let normalizedPhone: string | undefined
@@ -317,12 +339,34 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
       }
     }
 
+    const emailChanged =
+      normalizedEmail !== undefined && normalizedEmail !== existingUser.email
+
+    if (emailChanged && normalizedEmail) {
+      const emailOwner = await prisma.user.findFirst({
+        where: {
+          OR: [{ email: normalizedEmail }, { pendingEmail: normalizedEmail }],
+          NOT: { id },
+        },
+        select: { id: true },
+      })
+
+      if (emailOwner && emailOwner.id !== id) {
+        return res.status(409).json({
+          error: "An account with this email already exists.",
+        })
+      }
+    }
+
     const phoneChanged =
       normalizedPhone !== undefined && normalizedPhone !== existingUser.phone
 
     if (phoneChanged && normalizedPhone) {
-      const phoneOwner = await prisma.user.findUnique({
-        where: { phone: normalizedPhone },
+      const phoneOwner = await prisma.user.findFirst({
+        where: {
+          OR: [{ phone: normalizedPhone }, { pendingPhone: normalizedPhone }],
+          NOT: { id },
+        },
         select: { id: true },
       })
 
@@ -337,10 +381,17 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
-        ...(normalizedPhone !== undefined ? { phone: normalizedPhone } : {}),
+        ...(emailChanged
+          ? {
+              pendingEmail: normalizedEmail,
+              emailVerifyOtp: null,
+              emailVerifyOtpExpiresAt: null,
+              emailVerifyOtpAttempts: 0,
+            }
+          : {}),
         ...(phoneChanged
           ? {
-              phoneVerified: false,
+              pendingPhone: normalizedPhone,
               phoneVerifyOtp: null,
               phoneVerifyOtpExpiresAt: null,
               phoneVerifyOtpAttempts: 0,
@@ -353,6 +404,8 @@ export async function updateUserProfile(req: AuthRequest, res: Response) {
         name: true,
         email: true,
         phone: true,
+        pendingEmail: true,
+        pendingPhone: true,
         roleDefault: true,
         providerAvatarUrl: true,
         emailVerified: true,
@@ -420,6 +473,7 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
               driverId: true,
               fromCity: true,
               toCity: true,
+              startTime: true,
               seatsAvailable: true,
               seatsTotal: true,
             },
@@ -532,6 +586,7 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
             paymentStatus: booking.paymentStatus,
             stripePaymentIntentId: booking.stripePaymentIntentId,
             source: "passenger_cancel_booking",
+            rideStartTime: booking.ride.startTime,
           })
         )
       )
@@ -748,7 +803,12 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
           passwordHash: null,
           providerAvatarUrl: null,
           emailVerified: false,
+          emailVerifiedAt: null,
           phoneVerified: false,
+          phoneVerifiedAt: null,
+          appleProviderId: null,
+          googleProviderId: null,
+          authMethods: [],
           stripeAccountId: preserveStripeConnectAccount
             ? user.stripeAccountId
             : null,

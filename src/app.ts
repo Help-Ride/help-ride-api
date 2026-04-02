@@ -5,6 +5,7 @@ import prisma from "./lib/prisma.js"
 import { registerRoutes } from "./routes/index.js"
 import webhookRoutes from "./routes/webhook.routes.js"
 import docsRoutes from "./routes/docs.routes.js"
+import publicRoutes from "./routes/public.routes.js"
 
 dotenv.config()
 
@@ -38,6 +39,7 @@ app.use((req, res, next) => {
 })
 app.use("/api/webhooks", webhookRoutes)
 app.use("/api/docs", docsRoutes)
+app.use(publicRoutes)
 app.use(express.json())
 
 app.get("/", (_req, res) => {

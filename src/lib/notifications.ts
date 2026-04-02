@@ -79,12 +79,14 @@ async function sendSmsToUserIds(userIds: string[], title: string, body: string) 
 
 export async function notifyUser(payload: NotificationPayload) {
   try {
+    const serializedData = serializeData(payload.data)
     const notification = await prisma.notification.create({
       data: {
         userId: payload.userId,
         title: payload.title,
         body: payload.body,
         type: payload.type ?? "system",
+        ...(serializedData ? { data: serializedData } : {}),
       },
     })
 
@@ -244,6 +246,7 @@ export async function notifyUsersByIds(payload: MultiUserPayload) {
     const userIds = Array.from(
       new Set(payload.userIds.filter((userId) => userId.trim().length > 0))
     )
+    const serializedData = serializeData(payload.data)
 
     if (userIds.length === 0) {
       return { notified: 0 }
@@ -255,6 +258,7 @@ export async function notifyUsersByIds(payload: MultiUserPayload) {
         title: payload.title,
         body: payload.body,
         type: payload.type ?? "system",
+        ...(serializedData ? { data: serializedData } : {}),
       })),
     })
 
@@ -282,6 +286,7 @@ export async function notifyUsersByIds(payload: MultiUserPayload) {
 
 export async function notifyUsersByRole(payload: BroadcastPayload) {
   try {
+    const serializedData = serializeData(payload.data)
     const tokens = await prisma.deviceToken.findMany({
       where: {
         user: {
@@ -307,6 +312,7 @@ export async function notifyUsersByRole(payload: BroadcastPayload) {
         title: payload.title,
         body: payload.body,
         type: payload.type ?? "system",
+        ...(serializedData ? { data: serializedData } : {}),
       })),
     })
 

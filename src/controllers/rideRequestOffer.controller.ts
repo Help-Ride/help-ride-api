@@ -1,6 +1,7 @@
 // src/controllers/rideRequestOffer.controller.ts
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
+import { expireStaleJitRideRequests } from "../lib/jitRideRequests.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { notifyUser, notifyUsersByIds } from "../lib/notifications.js"
 
@@ -36,6 +37,8 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
         .status(400)
         .json({ error: "rideRequestId and rideId are required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId })
 
     const [rideRequest, ride] = await Promise.all([
       prisma.rideRequest.findUnique({ where: { id: rideRequestId } }),
@@ -190,6 +193,8 @@ export async function listRideRequestOffers(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "rideRequestId is required" })
     }
 
+    await expireStaleJitRideRequests({ rideRequestId })
+
     const rideRequest = await prisma.rideRequest.findUnique({
       where: { id: rideRequestId },
     })
@@ -246,6 +251,8 @@ export async function listMyRideRequestOffers(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Unauthorized" })
     }
 
+    await expireStaleJitRideRequests()
+
     const offers = await prisma.rideRequestOffer.findMany({
       where: { driverId: req.userId },
       orderBy: { createdAt: "desc" },
@@ -294,6 +301,8 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
         .json({ error: "rideRequestId and offerId are required" })
     }
 
+    await expireStaleJitRideRequests({ rideRequestId })
+
     const offer = await prisma.rideRequestOffer.findUnique({
       where: { id: offerId },
       include: { rideRequest: true, ride: true },
@@ -327,7 +336,15 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Ride is not open for booking" })
     }
 
-    if (offer.ride.seatsAvailable < offer.seatsOffered) {
+    if (offer.seatsOffered < offer.rideRequest.seatsNeeded) {
+      return res.status(400).json({
+        error: "Offer no longer satisfies the requested seat count",
+      })
+    }
+
+    const acceptedSeats = offer.rideRequest.seatsNeeded
+
+    if (offer.ride.seatsAvailable < acceptedSeats) {
       return res.status(400).json({ error: "Not enough seats available" })
     }
 
@@ -365,7 +382,7 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
         data: {
           rideId: offer.ride.id,
           passengerId: offer.rideRequest.passengerId,
-          seatsBooked: offer.seatsOffered,
+          seatsBooked: acceptedSeats,
           status: "ACCEPTED",
         },
         include: {
@@ -400,9 +417,9 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
       prisma.ride.update({
         where: { id: offer.ride.id },
         data: {
-          seatsAvailable: offer.ride.seatsAvailable - offer.seatsOffered,
+          seatsAvailable: offer.ride.seatsAvailable - acceptedSeats,
           status:
-            offer.ride.seatsAvailable - offer.seatsOffered <= 0
+            offer.ride.seatsAvailable - acceptedSeats <= 0
               ? "open"
               : offer.ride.status,
         },
@@ -474,6 +491,8 @@ export async function rejectRideRequestOffer(req: AuthRequest, res: Response) {
         .json({ error: "rideRequestId and offerId are required" })
     }
 
+    await expireStaleJitRideRequests({ rideRequestId })
+
     const offer = await prisma.rideRequestOffer.findUnique({
       where: { id: offerId },
       include: { rideRequest: true },
@@ -536,6 +555,8 @@ export async function cancelRideRequestOffer(req: AuthRequest, res: Response) {
         .status(400)
         .json({ error: "rideRequestId and offerId are required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId })
 
     const offer = await prisma.rideRequestOffer.findUnique({
       where: { id: offerId },

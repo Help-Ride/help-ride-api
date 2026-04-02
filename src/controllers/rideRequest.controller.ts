@@ -3,11 +3,17 @@ import { createHash } from "node:crypto"
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
+import {
+  clearJitRideRequestExpirySchedule,
+  expireStaleJitRideRequests,
+  scheduleJitRideRequestExpiry,
+} from "../lib/jitRideRequests.js"
 import { resolveSeatPrice } from "../lib/pricing.js"
 import { initiateRideRequestRefund } from "../lib/refunds.js"
 import { getPlatformFeePct, stripe } from "../lib/stripe.js"
 import { notifyNearbyDriversForRideRequest } from "../lib/nearbyDriverNotifications.js"
 import { notifyUser, notifyUsersByIds } from "../lib/notifications.js"
+import { createPaymentSheetCustomerContext } from "../lib/stripeCustomer.js"
 import {
   dispatchRideRequest,
   dispatchRideRequestCancel,
@@ -495,12 +501,15 @@ export async function createJitRideRequestPaymentIntent(
       currency: "cad",
       metadata,
     })
+    const customerContext = await createPaymentSheetCustomerContext(req.userId)
 
     const paymentIntent = await stripe.paymentIntents.create(
       {
         amount: amountCents,
         currency: "cad",
+        customer: customerContext.customerId,
         automatic_payment_methods: { enabled: true },
+        setup_future_usage: "on_session",
         metadata,
       },
       { idempotencyKey }
@@ -515,6 +524,8 @@ export async function createJitRideRequestPaymentIntent(
       paymentIntentId: paymentIntent.id,
       amount: paymentIntent.amount,
       currency: paymentIntent.currency,
+      customerId: customerContext.customerId,
+      customerEphemeralKeySecret: customerContext.customerEphemeralKeySecret,
       quotedPricePerSeat: pricing.pricePerSeat,
       requestMode: "JIT",
     })
@@ -531,6 +542,9 @@ export async function updateRide(req: AuthRequest, res: Response) {
     }
 
     const { id } = req.params
+    if (id) {
+      await expireStaleJitRideRequests({ rideRequestId: id })
+    }
     const body = (req.body ?? {}) as UpdateRideRequestBody
 
     const {
@@ -686,6 +700,18 @@ export async function updateRide(req: AuthRequest, res: Response) {
       })
     }
 
+    if (
+      updated.mode === "JIT" &&
+      ACTIVE_REQUEST_STATUSES.has(updated.status) &&
+      !updated.driverId
+    ) {
+      scheduleJitRideRequestExpiry({
+        rideRequestId: updated.id,
+        createdAt: updated.createdAt,
+        preferredDate: updated.preferredDate,
+      })
+    }
+
     return res.json(updated)
   } catch (err) {
     console.error("PUT /ride-requests/:id error", err)
@@ -699,6 +725,8 @@ export async function updateRide(req: AuthRequest, res: Response) {
  */
 export async function listRideRequests(req: AuthRequest, res: Response) {
   try {
+    await expireStaleJitRideRequests()
+
     const {
       fromCity,
       toCity,
@@ -1015,6 +1043,8 @@ export async function getMyRideRequests(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Unauthorized" })
     }
 
+    await expireStaleJitRideRequests()
+
     const requests = await prisma.rideRequest.findMany({
       where: { passengerId: req.userId },
       orderBy: { createdAt: "desc" },
@@ -1047,6 +1077,8 @@ export async function getRideRequestDetail(req: AuthRequest, res: Response) {
     if (!id) {
       return res.status(400).json({ error: "id is required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId: id })
 
     const request = await prisma.rideRequest.findUnique({
       where: { id },
@@ -1118,6 +1150,8 @@ export async function getRideRequestById(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "id is required" })
     }
 
+    await expireStaleJitRideRequests({ rideRequestId: id })
+
     const request = await prisma.rideRequest.findUnique({
       where: { id },
       include: {
@@ -1165,6 +1199,8 @@ export async function cancelRideRequest(req: AuthRequest, res: Response) {
     if (!id) {
       return res.status(400).json({ error: "id is required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId: id })
 
     const existing = await prisma.rideRequest.findUnique({
       where: { id },
@@ -1267,6 +1303,8 @@ export async function cancelRideRequest(req: AuthRequest, res: Response) {
       )
     }
 
+    clearJitRideRequestExpirySchedule(existing.id)
+
     return res.status(200).json(updated)
   } catch (err) {
     console.error("POST /ride-requests/:id/cancel error", err)
@@ -1280,6 +1318,7 @@ export async function cancelRideRequest(req: AuthRequest, res: Response) {
  */
 export async function acceptRideRequest(req: AuthRequest, res: Response) {
   try {
+    const { id } = req.params
     const headerSecret = req.header("X-REALTIME-SECRET")
     const expectedSecret = getRealtimeToApiSecret()
 
@@ -1287,10 +1326,11 @@ export async function acceptRideRequest(req: AuthRequest, res: Response) {
       return res.status(403).json({ error: "Forbidden" })
     }
 
-    const { id } = req.params
     if (!id) {
       return res.status(400).json({ error: "id is required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId: id })
 
     const { driverId, rideId, seatsOffered, pricePerSeat } =
       (req.body ?? {}) as AcceptRideRequestBody
@@ -1568,6 +1608,8 @@ export async function acceptRideRequest(req: AuthRequest, res: Response) {
           },
         })
       }
+
+      clearJitRideRequestExpirySchedule(updatedRideRequest.id)
 
       return res.status(200).json({
         ok: true,

@@ -23,6 +23,18 @@ enum AuthProvider {
   apple
 }
 
+enum AccountStatus {
+  active
+  locked
+  suspended
+  deleted
+}
+
+enum AuthChallengeChannel {
+  phone
+  email
+}
+
 enum RideStatus {
   open
   ongoing
@@ -105,14 +117,24 @@ model DriverDocument {
 model User {
   id                        String           @id @default(uuid())
   name                      String
-  email                     String           @unique
+  email                     String?          @unique
   phone                     String?          @unique
+  pendingEmail              String?          @unique
+  pendingPhone              String?          @unique
   passwordHash              String?
   roleDefault               RoleDefault      @default(passenger)
   providerAvatarUrl         String?
   emailVerified             Boolean          @default(false)
   phoneVerified             Boolean          @default(false)
+  emailVerifiedAt           DateTime?
+  phoneVerifiedAt           DateTime?
+  appleProviderId           String?          @unique
+  googleProviderId          String?          @unique
+  authMethods               String[]         @default([])
+  lastLoginAt               DateTime?
+  accountStatus             AccountStatus    @default(active)
   stripeAccountId           String?          @unique
+  stripeCustomerId          String?          @unique
   deletedAt                 DateTime?
 
   emailVerifyOtp            String?
@@ -129,6 +151,7 @@ model User {
   updatedAt                 DateTime         @updatedAt
 
   oauthAccounts        OAuthAccount[]
+  authChallenges       AuthChallenge[]
   driverProfile        DriverProfile?
   rides                Ride[]           @relation("DriverRides")
   bookings             Booking[]        @relation("PassengerBookings")
@@ -145,6 +168,34 @@ model User {
   deviceTokens           DeviceToken[]
   supportTickets         SupportTicket[]
   userLocation           UserLocation?
+  blockedUsers           BlockedUser[]     @relation("BlockingUser")
+  blockedByUsers         BlockedUser[]     @relation("BlockedUser")
+}
+
+model AuthChallenge {
+  id                 String               @id @default(uuid())
+  channel            AuthChallengeChannel
+  identifier         String
+  user               User?                @relation(fields: [userId], references: [id])
+  userId             String?
+  otp                String
+  expiresAt          DateTime
+  resendAvailableAt  DateTime
+  verifyAttempts     Int                  @default(0)
+  sendCount          Int                  @default(1)
+  lockedUntil        DateTime?
+  requestedFromIp    String?
+  requestedFromDevice String?
+  verifiedAt         DateTime?
+  consumedAt         DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([identifier])
+  @@index([channel, identifier, createdAt])
+  @@index([requestedFromIp, createdAt])
+  @@index([requestedFromDevice, createdAt])
+  @@index([expiresAt])
 }
 
 model OAuthAccount {
@@ -281,6 +332,21 @@ model Payment {
   @@index([bookingId])
 }
 
+model RideRequestPayment {
+  id              String        @id @default(uuid())
+  rideRequest      RideRequest   @relation(fields: [rideRequestId], references: [id])
+  rideRequestId    String        @unique
+  paymentIntentId  String        @unique
+  amountCents      Int
+  platformFeeCents Int
+  currency         String        @default("cad")
+  status           PaymentStatus @default(pending)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([rideRequestId])
+}
+
 model Notification {
   id          String           @id @default(uuid())
   user        User             @relation(fields: [userId], references: [id])
@@ -288,6 +354,7 @@ model Notification {
   title       String
   body        String
   type        NotificationType @default(system)
+  data        Json?
   isRead      Boolean          @default(false)
   createdAt   DateTime         @default(now())
 }
@@ -364,6 +431,17 @@ model Message {
   @@index([conversationId, createdAt])
 }
 
+model BlockedUser {
+  blocker       User     @relation("BlockingUser", fields: [blockerId], references: [id])
+  blockerId     String
+  blockedUser   User     @relation("BlockedUser", fields: [blockedUserId], references: [id])
+  blockedUserId String
+  createdAt     DateTime @default(now())
+
+  @@id([blockerId, blockedUserId])
+  @@index([blockedUserId])
+}
+
 enum RideRequestStatus {
   PENDING
   OFFERING
@@ -432,6 +510,7 @@ model RideRequest {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
+  jitPayment     RideRequestPayment?
   offers         RideRequestOffer[]
 
   @@index([status])

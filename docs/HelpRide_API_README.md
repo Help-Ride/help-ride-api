@@ -28,7 +28,29 @@ Dev:     https://dev-help-ride-api.vercel.app/api
 
 ## 🔐 Authentication
 
-### Register (Email + Password)
+### Passwordless Continue Flow
+
+The mobile rider app now uses a unified passwordless auth entry flow:
+
+- `POST /auth/continue/phone`
+- `POST /auth/continue/phone/verify`
+- `POST /auth/continue/email`
+- `POST /auth/continue/email/verify`
+- `POST /auth/onboarding/complete`
+
+Phone OTP is the primary path. Apple and Google OAuth remain supported. Email
+OTP is the fallback path. If the OTP belongs to an existing rider, the verify
+endpoint returns tokens immediately. If the OTP belongs to a new rider, the
+verify endpoint returns an `onboardingToken`, and the client finishes the
+minimal profile with `/auth/onboarding/complete` before receiving session
+tokens.
+
+Legacy password login and registration are still available temporarily for
+migration, but they are no longer exposed in the main rider UI.
+
+---
+
+### Register (Legacy Email + Password)
 
 `POST /auth/register`
 
@@ -69,7 +91,7 @@ App-review allowlisted emails can still use the existing bypass flow unchanged.
 
 ---
 
-### Login
+### Login (Legacy)
 
 `POST /auth/login`
 
@@ -426,6 +448,10 @@ the generated `occurrenceStartTimes` plus the shared recurrence metadata. If a
 client accidentally omits `rideType` but still sends recurrence metadata, the
 API treats the request as recurring instead of silently downgrading it. The API
 creates one ride row per occurrence and links them with `recurringSeriesId`.
+After `5` completed rides by the same driver, this endpoint also requires
+Stripe Connect setup plus an uploaded ownership/registration document. If those
+deferred compliance items are missing, the API returns `403` with code
+`DRIVER_COMPLIANCE_REQUIRED`.
 
 Response:
 
@@ -515,6 +541,12 @@ Response:
 
 `GET /rides/me/list`
 
+Recurring schedules are still stored and returned as individual ride
+occurrences. Each recurring occurrence includes `rideType: "recurring"` plus a
+shared `recurringSeriesId`, so the app can group them into one recurring series
+for management while preserving occurrence-level bookings, status, edits, and
+exceptions.
+
 Response:
 
 ```json
@@ -528,6 +560,10 @@ Response:
     "pricePerSeat": 22,
     "seatsTotal": 1,
     "seatsAvailable": 1,
+    "rideType": "recurring",
+    "recurringSeriesId": "series-uuid",
+    "recurrenceDays": ["monday", "wednesday", "friday"],
+    "recurrenceEndDate": "2026-01-31T04:59:59.999Z",
     "status": "open",
     "createdAt": "2025-01-01T00:00:00.000Z",
     "updatedAt": "2025-01-01T00:00:00.000Z"
@@ -578,6 +614,30 @@ Response:
 `pricePerSeat` is immutable after a ride is created. If you need a different
 fare, create a new ride instead of updating the existing one.
 
+Recurring rides support an optional `scope` field:
+
+- `occurrence`: update only the selected occurrence
+- `future`: update the selected occurrence and future occurrences in the same
+  recurring series
+- `series`: update every occurrence in the same recurring series
+
+The backend keeps occurrence rows intact and applies the edit to the selected
+set of rows. This preserves occurrence-level booking, cancellation, and
+exception management.
+
+Example request:
+
+```json
+{
+  "fromCity": "Waterloo",
+  "toCity": "Toronto",
+  "startTime": "2025-12-20T08:00:00.000Z",
+  "arrivalTime": "2025-12-20T10:00:00.000Z",
+  "seatsTotal": 3,
+  "scope": "future"
+}
+```
+
 Response:
 
 ```json
@@ -598,9 +658,12 @@ Response:
 
 ---
 
-### Delete Ride (Driver)
+### Delete Ride (Driver, Hard Delete)
 
 `DELETE /rides/{rideId}`
+
+This permanently removes the ride row. It should not be used as the normal
+operational cancel path for recurring management.
 
 Response:
 
@@ -620,9 +683,20 @@ Cancel body:
 
 ```json
 {
-  "reason": "Driver unavailable"
+  "reason": "Driver unavailable",
+  "scope": "occurrence"
 }
 ```
+
+Recurring cancellation also supports:
+
+- `occurrence`
+- `future`
+- `series`
+
+This marks the selected occurrence(s) as cancelled without deleting their ride
+rows, so booking history, status tracking, and recurring-series exception
+reporting remain intact.
 
 Start response:
 
@@ -938,6 +1012,10 @@ Response:
 
 `POST /bookings/{bookingId}/cancel`
 
+Notes:
+- If payment was already completed and the passenger cancels more than 2 hours before departure, Stripe refund is initiated automatically.
+- Passenger cancellations within 2 hours of departure do not initiate a refund.
+
 Response:
 
 ```json
@@ -1034,7 +1112,27 @@ Response:
 
 Current flow:
 - Passenger card payments are collected into the HelpRide Stripe platform account.
+- Passengers are backed by Stripe Customers so cards can be saved and reused in future checkouts.
 - Driver payouts are sent using Stripe Connect `transfer` from the platform balance.
+
+### Create SetupIntent (Save Payment Method)
+
+`POST /payments/setup-intent`
+
+Response:
+
+```json
+{
+  "setupIntentClientSecret": "seti_..._secret_...",
+  "customerId": "cus_...",
+  "customerEphemeralKeySecret": "ek_..."
+}
+```
+
+Notes:
+- Creates or reuses a Stripe Customer for the authenticated passenger.
+- Used by the mobile app's payment-method management sheet.
+- Cards saved here are reusable in future PaymentSheet checkouts.
 
 ### Create PaymentIntent (Passenger)
 
@@ -1054,6 +1152,8 @@ Response:
   "paymentIntentId": "pi_...",
   "amount": 2200,
   "currency": "cad",
+  "customerId": "cus_...",
+  "customerEphemeralKeySecret": "ek_...",
   "helpRideFeeCents": 330,
   "driverEarningsCents": 1870
 }
@@ -1061,8 +1161,9 @@ Response:
 
 Notes:
 - Booking must be `ACCEPTED`.
-- Amount is computed server-side (distance/seat-based pricing model) and never accepted from client input.
+- Amount is computed server-side from the accepted booking (`ride.pricePerSeat x seatsBooked`) and never accepted from client input.
 - If a booking already has a `stripePaymentIntentId`, the existing intent is reused (idempotency).
+- PaymentIntents are attached to the authenticated passenger's Stripe Customer with `setup_future_usage=on_session`, so saved cards can be reused in later checkouts.
 - Booking transitions to `PAYMENT_PENDING` after intent creation/reuse.
 - Funds are collected into the HelpRide Stripe account; driver payout is a separate transfer step.
 
@@ -1202,6 +1303,7 @@ Status notes:
 - Stripe redirects here when onboarding flow exits.
 - Returns HTML by default, or JSON with `?format=json`.
 - If `STRIPE_CONNECT_APP_RETURN_URL` is set, backend redirects there with status query params.
+- `STRIPE_CONNECT_APP_RETURN_URL` can be a universal link or a native app deep link such as `helpride://stripe/return`.
 
 ---
 
@@ -1223,6 +1325,7 @@ Status notes:
 3. Set Connect redirect URLs to backend endpoints:
    - `STRIPE_CONNECT_REFRESH_URL=https://api.yourdomain.com/api/stripe/connect/refresh`
    - `STRIPE_CONNECT_RETURN_URL=https://api.yourdomain.com/api/stripe/connect/return`
+   - On a physical phone, these must not point to `localhost`.
 4. Add/update webhook endpoint: `POST /api/webhooks/stripe`.
 5. Subscribe webhook events:
    - `payment_intent.succeeded`
@@ -1236,7 +1339,7 @@ Status notes:
    - `STRIPE_CONNECT_RETURN_URL`
    - `STRIPE_CONNECT_STATE_SECRET` (recommended)
    - `STRIPE_CONNECT_COUNTRY` (optional, default `CA`)
-   - `STRIPE_CONNECT_APP_RETURN_URL` (optional app redirect)
+   - `STRIPE_CONNECT_APP_RETURN_URL` (optional app redirect, for example `helpride://stripe/return`)
    - `STRIPE_CONNECT_BUSINESS_PROFILE_URL` (optional, can reduce website prompts)
    - `STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION` (optional, default provided)
    - `STRIPE_CONNECT_BUSINESS_PROFILE_MCC` (optional 4-digit industry code, can reduce industry prompts)
@@ -1256,9 +1359,7 @@ Status notes:
   "carModel": "Corolla",
   "carYear": "2020",
   "carColor": "White",
-  "plateNumber": "ABC-123",
-  "licenseNumber": "LIC-987654",
-  "insuranceInfo": "Policy #123456"
+  "plateNumber": "ABC-123"
 }
 ```
 
@@ -1273,8 +1374,8 @@ Response:
   "carYear": "2020",
   "carColor": "White",
   "plateNumber": "ABC-123",
-  "licenseNumber": "LIC-987654",
-  "insuranceInfo": "Policy #123456",
+  "licenseNumber": null,
+  "insuranceInfo": null,
   "isVerified": false,
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z",
@@ -1286,6 +1387,9 @@ Response:
   }
 }
 ```
+
+- `licenseNumber` and `insuranceInfo` remain optional text fields.
+- Initial onboarding should use uploaded license and insurance documents for verification.
 
 ---
 
@@ -1991,6 +2095,8 @@ Response:
 
 `POST /chat/conversations`
 
+Requires the ride booking for that passenger to be paid before chat unlocks for either passenger or driver. If payment is still pending or unpaid, the endpoint returns `403` with code `CHAT_PAYMENT_REQUIRED`.
+
 ```json
 {
   "rideId": "ride-uuid",
@@ -2009,6 +2115,8 @@ Response:
   "tripTime": "Mar 5, 9:30 PM",
   "rideStatus": "open",
   "ridePricePerSeat": 15,
+  "paymentRequired": false,
+  "chatDisabled": false,
   "passengerId": "passenger-uuid",
   "driverId": "driver-uuid",
   "lastMessageAt": null,
@@ -2058,6 +2166,8 @@ Response:
     "tripTime": "Mar 5, 9:30 PM",
     "rideStatus": "open",
     "ridePricePerSeat": 15,
+    "paymentRequired": false,
+    "chatDisabled": false,
     "passengerId": "passenger-uuid",
     "driverId": "driver-uuid",
     "lastMessageAt": "2025-01-01T02:00:00.000Z",
@@ -2095,6 +2205,8 @@ Response:
 ### List Messages
 
 `GET /chat/conversations/{conversationId}/messages?limit=50&cursor=...`
+
+Returns `403` with code `CHAT_PAYMENT_REQUIRED` until payment is completed for the booking tied to that conversation.
 
 Response:
 
@@ -2141,6 +2253,8 @@ Response:
 ### Send Message
 
 `POST /chat/conversations/{conversationId}/messages`
+
+Returns `403` with code `CHAT_PAYMENT_REQUIRED` until payment is completed for the booking tied to that conversation.
 
 ```json
 {
@@ -2206,6 +2320,11 @@ Response:
       "title": "Booking accepted",
       "body": "Waterloo → Toronto is accepted",
       "type": "ride_update",
+      "data": {
+        "kind": "booking_request",
+        "rideId": "ride-uuid",
+        "bookingId": "booking-uuid"
+      },
       "isRead": false,
       "createdAt": "2025-01-01T00:00:00.000Z"
     }
@@ -2360,9 +2479,9 @@ Response:
 }
 ```
 
-If the phone number changes, the backend clears `phoneVerified` and the user
-must verify the new number again before SMS ride alerts or SMS OTP login should
-be considered trusted.
+If the email or phone number changes, the backend keeps the current verified
+contact active and stores the replacement as pending until OTP verification
+succeeds. The new contact is only promoted after verification completes.
 
 ---
 
@@ -2484,7 +2603,7 @@ STRIPE_CONNECT_STATE_SECRET=...
 # optional (default: CA)
 # STRIPE_CONNECT_COUNTRY=CA
 # optional: deep-link/universal-link handoff URL for app
-# STRIPE_CONNECT_APP_RETURN_URL=https://app.example.com/stripe/return
+# STRIPE_CONNECT_APP_RETURN_URL=helpride://stripe/return
 # optional: prefill business profile in onboarding
 # STRIPE_CONNECT_BUSINESS_PROFILE_URL=https://helpride.com
 # STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION=Ride-sharing transportation services through HelpRide app

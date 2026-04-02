@@ -491,6 +491,7 @@ export async function cancelBookingByPassenger(req: AuthRequest, res: Response) 
         paymentStatus: booking.paymentStatus,
         stripePaymentIntentId: booking.stripePaymentIntentId,
         source: "passenger_cancel_booking",
+        rideStartTime: booking.ride.startTime,
       })
     } catch (refundErr) {
       console.error("Refund initiation failed for passenger cancellation", {
@@ -634,6 +635,7 @@ export async function cancelBookingByDriver(req: AuthRequest, res: Response) {
         paymentStatus: booking.paymentStatus,
         stripePaymentIntentId: booking.stripePaymentIntentId,
         source: "driver_cancel_booking",
+        rideStartTime: booking.ride.startTime,
       })
     } catch (refundErr) {
       console.error("Refund initiation failed for driver cancellation", {
