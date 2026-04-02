@@ -45,6 +45,10 @@ verify endpoint returns an `onboardingToken`, and the client finishes the
 minimal profile with `/auth/onboarding/complete` before receiving session
 tokens.
 
+For local / QA testing, the configured test phone can bypass SMS delivery. By
+default outside production, `+11111111111` uses OTP `123456`. In the app, an
+entered `1111111111` is normalized to that same E.164 number.
+
 Legacy password login and registration are still available temporarily for
 migration, but they are no longer exposed in the main rider UI.
 
@@ -205,6 +209,9 @@ Response:
 }
 ```
 
+If the configured test phone is used while the test override is enabled, the
+server stores OTP `123456` and skips SMS delivery.
+
 #### Verify OTP
 
 `POST /auth/verify-phone/verify-otp`
@@ -215,6 +222,8 @@ Response:
   "otp": "123456"
 }
 ```
+
+For the configured test phone, use `123456` while the override is enabled.
 
 Response:
 

@@ -99,6 +99,11 @@ TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 TWILIO_AUTH_TOKEN="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 TWILIO_FROM_PHONE="+14165551234"
 TWILIO_SMS_NOTIFICATIONS_ENABLED=true
+# Optional local / QA shortcut. Enabled by default outside production.
+# App input `1111111111` normalizes to `+11111111111`.
+# TEST_PHONE_OTP_ENABLED=true
+# TEST_PHONE_OTP_PHONE="+11111111111"
+# TEST_PHONE_OTP_CODE="123456"
 
 # AWS S3 (Driver documents)
 AWS_S3_BUCKET="your-bucket-name"
