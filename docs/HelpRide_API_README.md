@@ -1012,6 +1012,10 @@ Response:
 
 `POST /bookings/{bookingId}/cancel`
 
+Notes:
+- If payment was already completed and the passenger cancels more than 2 hours before departure, Stripe refund is initiated automatically.
+- Passenger cancellations within 2 hours of departure do not initiate a refund.
+
 Response:
 
 ```json
@@ -1299,6 +1303,7 @@ Status notes:
 - Stripe redirects here when onboarding flow exits.
 - Returns HTML by default, or JSON with `?format=json`.
 - If `STRIPE_CONNECT_APP_RETURN_URL` is set, backend redirects there with status query params.
+- `STRIPE_CONNECT_APP_RETURN_URL` can be a universal link or a native app deep link such as `helpride://stripe/return`.
 
 ---
 
@@ -1320,6 +1325,7 @@ Status notes:
 3. Set Connect redirect URLs to backend endpoints:
    - `STRIPE_CONNECT_REFRESH_URL=https://api.yourdomain.com/api/stripe/connect/refresh`
    - `STRIPE_CONNECT_RETURN_URL=https://api.yourdomain.com/api/stripe/connect/return`
+   - On a physical phone, these must not point to `localhost`.
 4. Add/update webhook endpoint: `POST /api/webhooks/stripe`.
 5. Subscribe webhook events:
    - `payment_intent.succeeded`
@@ -1333,7 +1339,7 @@ Status notes:
    - `STRIPE_CONNECT_RETURN_URL`
    - `STRIPE_CONNECT_STATE_SECRET` (recommended)
    - `STRIPE_CONNECT_COUNTRY` (optional, default `CA`)
-   - `STRIPE_CONNECT_APP_RETURN_URL` (optional app redirect)
+   - `STRIPE_CONNECT_APP_RETURN_URL` (optional app redirect, for example `helpride://stripe/return`)
    - `STRIPE_CONNECT_BUSINESS_PROFILE_URL` (optional, can reduce website prompts)
    - `STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION` (optional, default provided)
    - `STRIPE_CONNECT_BUSINESS_PROFILE_MCC` (optional 4-digit industry code, can reduce industry prompts)
@@ -1353,9 +1359,7 @@ Status notes:
   "carModel": "Corolla",
   "carYear": "2020",
   "carColor": "White",
-  "plateNumber": "ABC-123",
-  "licenseNumber": "LIC-987654",
-  "insuranceInfo": "Policy #123456"
+  "plateNumber": "ABC-123"
 }
 ```
 
@@ -1370,8 +1374,8 @@ Response:
   "carYear": "2020",
   "carColor": "White",
   "plateNumber": "ABC-123",
-  "licenseNumber": "LIC-987654",
-  "insuranceInfo": "Policy #123456",
+  "licenseNumber": null,
+  "insuranceInfo": null,
   "isVerified": false,
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z",
@@ -1383,6 +1387,9 @@ Response:
   }
 }
 ```
+
+- `licenseNumber` and `insuranceInfo` remain optional text fields.
+- Initial onboarding should use uploaded license and insurance documents for verification.
 
 ---
 
@@ -2596,7 +2603,7 @@ STRIPE_CONNECT_STATE_SECRET=...
 # optional (default: CA)
 # STRIPE_CONNECT_COUNTRY=CA
 # optional: deep-link/universal-link handoff URL for app
-# STRIPE_CONNECT_APP_RETURN_URL=https://app.example.com/stripe/return
+# STRIPE_CONNECT_APP_RETURN_URL=helpride://stripe/return
 # optional: prefill business profile in onboarding
 # STRIPE_CONNECT_BUSINESS_PROFILE_URL=https://helpride.com
 # STRIPE_CONNECT_BUSINESS_PROFILE_DESCRIPTION=Ride-sharing transportation services through HelpRide app

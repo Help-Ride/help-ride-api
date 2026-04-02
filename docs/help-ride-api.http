@@ -695,7 +695,8 @@ Accept: application/json
 ###
 
 ### PASSENGER: CANCEL BOOKING
-# If booking was paid, refund is initiated automatically.
+# If booking was paid, refund is initiated automatically only when cancelling
+# more than 2 hours before departure. Within 2 hours, no refund is issued.
 POST {{baseUrl}}/bookings/{{bookingId}}/cancel
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -703,7 +704,8 @@ Accept: application/json
 ###
 
 ### PASSENGER: CANCEL BOOKING (PUT alias)
-# If booking was paid, refund is initiated automatically.
+# If booking was paid, refund is initiated automatically only when cancelling
+# more than 2 hours before departure. Within 2 hours, no refund is issued.
 PUT {{baseUrl}}/bookings/{{bookingId}}/cancel
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -711,7 +713,8 @@ Accept: application/json
 ###
 
 ### PASSENGER: CANCEL BOOKING (DELETE alias)
-# If booking was paid, refund is initiated automatically.
+# If booking was paid, refund is initiated automatically only when cancelling
+# more than 2 hours before departure. Within 2 hours, no refund is issued.
 DELETE {{baseUrl}}/bookings/{{bookingId}}
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -843,9 +846,7 @@ Content-Type: application/json
   "carModel": "Corolla",
   "carYear": "2020",
   "carColor": "White",
-  "plateNumber": "ABC-123",
-  "licenseNumber": "LIC-987654",
-  "insuranceInfo": "Intact Insurance - Policy #123456"
+  "plateNumber": "ABC-123"
 }
 
 ###
@@ -923,7 +924,10 @@ Accept: application/json
 ################################################
 
 ### CREATE JIT PAYMENT INTENT (PASSENGER, <= 2 HOURS TO DEPARTURE)
-# On successful payment webhook, ride request is created and nearby drivers are notified.
+# On successful payment webhook, ride request is created, paid JIT state is persisted,
+# and nearby drivers are notified.
+# If no driver is matched before the JIT timeout/departure, the request auto-expires
+# and Stripe refund is initiated.
 POST {{baseUrl}}/ride-requests/jit/intent
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -981,6 +985,8 @@ Accept: application/json
 ###
 
 ### MY RIDE REQUESTS (PASSENGER)
+# Touching ride-request endpoints also sweeps stale JIT requests so unmatched paid
+# requests move to EXPIRED and refund flow is triggered if needed.
 GET {{baseUrl}}/ride-requests/me/list
 Authorization: Bearer {{accessToken}}
 Accept: application/json
@@ -1333,6 +1339,8 @@ Accept: application/json
 ###
 
 ### STRIPE CONNECT RETURN (PUBLIC REDIRECT ENDPOINT)
+# If STRIPE_CONNECT_APP_RETURN_URL is set, browser requests will be redirected
+# back into the app, for example `helpride://stripe/return?...`.
 GET {{baseUrl}}/stripe/connect/return?state={{connectState}}&format=json
 Accept: application/json
 

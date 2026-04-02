@@ -332,6 +332,21 @@ model Payment {
   @@index([bookingId])
 }
 
+model RideRequestPayment {
+  id              String        @id @default(uuid())
+  rideRequest      RideRequest   @relation(fields: [rideRequestId], references: [id])
+  rideRequestId    String        @unique
+  paymentIntentId  String        @unique
+  amountCents      Int
+  platformFeeCents Int
+  currency         String        @default("cad")
+  status           PaymentStatus @default(pending)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([rideRequestId])
+}
+
 model Notification {
   id          String           @id @default(uuid())
   user        User             @relation(fields: [userId], references: [id])
@@ -495,6 +510,7 @@ model RideRequest {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
+  jitPayment     RideRequestPayment?
   offers         RideRequestOffer[]
 
   @@index([status])

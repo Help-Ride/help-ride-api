@@ -3,10 +3,11 @@ import jwt from "jsonwebtoken"
 import Stripe from "stripe"
 import prisma from "../lib/prisma.js"
 import type { AuthRequest } from "../middleware/auth.js"
+import { scheduleJitRideRequestExpiry } from "../lib/jitRideRequests.js"
 import { notifyNearbyDriversForRideRequest } from "../lib/nearbyDriverNotifications.js"
 import { notifyUser } from "../lib/notifications.js"
 import { dispatchRideRequest } from "../lib/realtime.js"
-import { getStripeWebhookSecret, stripe } from "../lib/stripe.js"
+import { getPlatformFeePct, getStripeWebhookSecret, stripe } from "../lib/stripe.js"
 
 const DEFAULT_CONNECT_COUNTRY = "CA"
 const CONNECT_STATE_EXPIRES_IN = "2h"
@@ -252,7 +253,12 @@ function getConnectAppReturnUrl() {
   }
   try {
     const parsed = new URL(raw)
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    const protocol = parsed.protocol.trim().toLowerCase()
+    if (
+      protocol.length === 0 ||
+      protocol === "javascript:" ||
+      protocol === "data:"
+    ) {
       return null
     }
     return parsed.toString()
@@ -954,6 +960,8 @@ type DispatchableJitRideRequest = {
   id: string
   status: string
   driverId: string | null
+  createdAt: Date
+  preferredDate: Date
   fromCity: string
   fromLat: number
   fromLng: number
@@ -1026,6 +1034,8 @@ async function handleJitRideRequestIntentSucceeded({
       id: true,
       status: true,
       driverId: true,
+      createdAt: true,
+      preferredDate: true,
       fromCity: true,
       fromLat: true,
       fromLng: true,
@@ -1046,6 +1056,12 @@ async function handleJitRideRequestIntentSucceeded({
     )
 
     if (canRedispatchRideRequest(existing)) {
+      scheduleJitRideRequestExpiry({
+        rideRequestId: existing.id,
+        createdAt: existing.createdAt,
+        preferredDate: existing.preferredDate,
+      })
+
       await dispatchJitRideRequest({
         eventId,
         paymentIntentId: intent.id,
@@ -1112,30 +1128,61 @@ async function handleJitRideRequestIntentSucceeded({
     throw new Error("Passenger not found for JIT ride request payment")
   }
 
-  const createdRequest = await prisma.rideRequest.create({
-    data: {
-      passengerId,
-      mode: "JIT",
-      jitPaymentIntentId: intent.id,
-      jitAmountCents: amountCents,
-      jitCurrency: intent.currency ?? "cad",
-      quotedPricePerSeat,
-      fromCity,
-      fromLat,
-      fromLng,
-      toCity,
-      toLat,
-      toLng,
-      preferredDate,
-      preferredTime: metadata.preferredTime?.trim() || null,
-      arrivalTime: metadata.arrivalTime?.trim() || null,
-      seatsNeeded,
-      rideType,
-      tripType,
-      returnDate,
-      returnTime: metadata.returnTime?.trim() || null,
-      status: "OFFERING",
-    },
+  const platformFeeCents = Math.round(amountCents * getPlatformFeePct())
+
+  const createdRequest = await prisma.$transaction(async (tx) => {
+    const request = await tx.rideRequest.create({
+      data: {
+        passengerId,
+        mode: "JIT",
+        jitPaymentIntentId: intent.id,
+        jitAmountCents: amountCents,
+        jitCurrency: intent.currency ?? "cad",
+        quotedPricePerSeat,
+        fromCity,
+        fromLat,
+        fromLng,
+        toCity,
+        toLat,
+        toLng,
+        preferredDate,
+        preferredTime: metadata.preferredTime?.trim() || null,
+        arrivalTime: metadata.arrivalTime?.trim() || null,
+        seatsNeeded,
+        rideType,
+        tripType,
+        returnDate,
+        returnTime: metadata.returnTime?.trim() || null,
+        status: "OFFERING",
+      },
+    })
+
+    await tx.rideRequestPayment.upsert({
+      where: { paymentIntentId: intent.id },
+      create: {
+        rideRequestId: request.id,
+        paymentIntentId: intent.id,
+        amountCents,
+        platformFeeCents,
+        currency: intent.currency ?? "cad",
+        status: "succeeded",
+      },
+      update: {
+        rideRequestId: request.id,
+        amountCents,
+        platformFeeCents,
+        currency: intent.currency ?? "cad",
+        status: "succeeded",
+      },
+    })
+
+    return request
+  })
+
+  scheduleJitRideRequestExpiry({
+    rideRequestId: createdRequest.id,
+    createdAt: createdRequest.createdAt,
+    preferredDate: createdRequest.preferredDate,
   })
 
   await notifyUser({
@@ -1287,6 +1334,29 @@ async function notifyBookingPaymentUpdate(payload: {
   ])
 }
 
+async function notifyRideRequestPaymentUpdate(payload: {
+  paymentStatus: PaymentStatusUpdate
+  rideRequestId: string
+  passengerId: string
+  fromCity: string
+  toCity: string
+}) {
+  if (payload.paymentStatus !== "refunded") {
+    return
+  }
+
+  await notifyUser({
+    userId: payload.passengerId,
+    title: "Refund processed",
+    body: `${payload.fromCity} → ${payload.toCity} request refund was processed`,
+    type: "payment",
+    data: {
+      rideRequestId: payload.rideRequestId,
+      kind: "ride_request_refunded",
+    },
+  })
+}
+
 async function handlePaymentIntentUpdate(
   args: {
     eventId: string
@@ -1304,32 +1374,50 @@ async function handlePaymentIntentUpdate(
     bookingStatus,
   } = args
 
-  const payment = await prisma.payment.findUnique({
-    where: { paymentIntentId },
-    select: {
-      id: true,
-      bookingId: true,
-      status: true,
-      booking: {
-        select: {
-          id: true,
-          status: true,
-          paymentStatus: true,
-          passengerId: true,
-          ride: {
-            select: {
-              id: true,
-              driverId: true,
-              fromCity: true,
-              toCity: true,
+  const [payment, rideRequestPayment] = await Promise.all([
+    prisma.payment.findUnique({
+      where: { paymentIntentId },
+      select: {
+        id: true,
+        bookingId: true,
+        status: true,
+        booking: {
+          select: {
+            id: true,
+            status: true,
+            paymentStatus: true,
+            passengerId: true,
+            ride: {
+              select: {
+                id: true,
+                driverId: true,
+                fromCity: true,
+                toCity: true,
+              },
             },
           },
         },
       },
-    },
-  })
+    }),
+    prisma.rideRequestPayment.findUnique({
+      where: { paymentIntentId },
+      select: {
+        id: true,
+        status: true,
+        rideRequestId: true,
+        rideRequest: {
+          select: {
+            id: true,
+            passengerId: true,
+            fromCity: true,
+            toCity: true,
+          },
+        },
+      },
+    }),
+  ])
 
-  if (!payment) {
+  if (!payment && !rideRequestPayment) {
     console.warn(
       "[webhooks][stripe] Payment not found for payment intent",
       JSON.stringify({ eventId, paymentIntentId })
@@ -1337,13 +1425,67 @@ async function handlePaymentIntentUpdate(
     return
   }
 
-  const shouldUpdatePayment = payment.status !== paymentStatus
-  const shouldUpdateBookingPayment =
-    payment.booking.paymentStatus !== bookingPaymentStatus
-  const hasBookingStatusUpdate =
-    Boolean(bookingStatus) && payment.booking.status !== bookingStatus
+  const shouldUpdatePayment = payment != null && payment.status !== paymentStatus
+  const shouldUpdateRideRequestPayment =
+    rideRequestPayment != null && rideRequestPayment.status !== paymentStatus
 
-  if (!shouldUpdatePayment && !shouldUpdateBookingPayment && !hasBookingStatusUpdate) {
+  if (!payment?.booking) {
+    const jitPayment = rideRequestPayment
+    if (!jitPayment) {
+      console.warn(
+        "[webhooks][stripe] Ride request payment record missing for payment intent",
+        JSON.stringify({ eventId, paymentIntentId })
+      )
+      return
+    }
+
+    if (!shouldUpdateRideRequestPayment) {
+      console.info(
+        "[webhooks][stripe] Duplicate ride request payment status event ignored",
+        JSON.stringify({ eventId, paymentIntentId, status: paymentStatus })
+      )
+      return
+    }
+
+    await prisma.rideRequestPayment.update({
+      where: { id: jitPayment.id },
+      data: { status: paymentStatus },
+    })
+
+    console.info(
+      "[webhooks][stripe] Ride request payment status updated",
+      JSON.stringify({
+        eventId,
+        paymentIntentId,
+        rideRequestId: jitPayment.rideRequestId,
+        paymentStatusFrom: jitPayment.status,
+        paymentStatusTo: paymentStatus,
+      })
+    )
+
+    await notifyRideRequestPaymentUpdate({
+      paymentStatus,
+      rideRequestId: jitPayment.rideRequest.id,
+      passengerId: jitPayment.rideRequest.passengerId,
+      fromCity: jitPayment.rideRequest.fromCity,
+      toCity: jitPayment.rideRequest.toCity,
+    })
+    return
+  }
+
+  const bookingPayment = payment
+
+  const shouldUpdateBookingPayment =
+    bookingPayment.booking.paymentStatus !== bookingPaymentStatus
+  const hasBookingStatusUpdate =
+    Boolean(bookingStatus) && bookingPayment.booking.status !== bookingStatus
+
+  if (
+    !shouldUpdatePayment &&
+    !shouldUpdateRideRequestPayment &&
+    !shouldUpdateBookingPayment &&
+    !hasBookingStatusUpdate
+  ) {
     console.info(
       "[webhooks][stripe] Duplicate payment status event ignored",
       JSON.stringify({ eventId, paymentIntentId, status: paymentStatus })
@@ -1358,19 +1500,20 @@ async function handlePaymentIntentUpdate(
   ])
 
   const canUpdateBookingStatus =
-    Boolean(bookingStatus) && !terminalBookingStatuses.has(payment.booking.status)
+    Boolean(bookingStatus) &&
+    !terminalBookingStatuses.has(bookingPayment.booking.status)
 
   if (hasBookingStatusUpdate && !canUpdateBookingStatus) {
     console.info(
-      "[webhooks][stripe] Booking status transition skipped for terminal booking",
-      JSON.stringify({
-        eventId,
-        paymentIntentId,
-        bookingId: payment.booking.id,
-        bookingStatusCurrent: payment.booking.status,
-        bookingStatusRequested: bookingStatus,
-      })
-    )
+        "[webhooks][stripe] Booking status transition skipped for terminal booking",
+        JSON.stringify({
+          eventId,
+          paymentIntentId,
+          bookingId: bookingPayment.booking.id,
+          bookingStatusCurrent: bookingPayment.booking.status,
+          bookingStatusRequested: bookingStatus,
+        })
+      )
   }
 
   const bookingData: {
@@ -1391,7 +1534,15 @@ async function handlePaymentIntentUpdate(
     ...(shouldUpdatePayment
       ? [
           prisma.payment.update({
-            where: { id: payment.id },
+            where: { id: bookingPayment.id },
+            data: { status: paymentStatus },
+          }),
+        ]
+      : []),
+    ...(shouldUpdateRideRequestPayment && rideRequestPayment != null
+      ? [
+          prisma.rideRequestPayment.update({
+            where: { id: rideRequestPayment.id },
             data: { status: paymentStatus },
           }),
         ]
@@ -1399,7 +1550,7 @@ async function handlePaymentIntentUpdate(
     ...(shouldPersistBooking
       ? [
           prisma.booking.update({
-            where: { id: payment.bookingId },
+            where: { id: bookingPayment.bookingId },
             data: bookingData,
           }),
         ]
@@ -1411,22 +1562,22 @@ async function handlePaymentIntentUpdate(
     JSON.stringify({
       eventId,
       paymentIntentId,
-      paymentStatusFrom: payment.status,
+      paymentStatusFrom: bookingPayment.status,
       paymentStatusTo: paymentStatus,
-      bookingStatusFrom: payment.booking.status,
-      bookingStatusTo: bookingData.status ?? payment.booking.status,
-      bookingPaymentStatusFrom: payment.booking.paymentStatus,
+      bookingStatusFrom: bookingPayment.booking.status,
+      bookingStatusTo: bookingData.status ?? bookingPayment.booking.status,
+      bookingPaymentStatusFrom: bookingPayment.booking.paymentStatus,
       bookingPaymentStatusTo: bookingPaymentStatus,
     })
   )
 
   await notifyBookingPaymentUpdate({
     paymentStatus,
-    bookingId: payment.booking.id,
-    rideId: payment.booking.ride.id,
-    passengerId: payment.booking.passengerId,
-    driverId: payment.booking.ride.driverId,
-    fromCity: payment.booking.ride.fromCity,
-    toCity: payment.booking.ride.toCity,
+    bookingId: bookingPayment.booking.id,
+    rideId: bookingPayment.booking.ride.id,
+    passengerId: bookingPayment.booking.passengerId,
+    driverId: bookingPayment.booking.ride.driverId,
+    fromCity: bookingPayment.booking.ride.fromCity,
+    toCity: bookingPayment.booking.ride.toCity,
   })
 }

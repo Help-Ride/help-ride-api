@@ -1,6 +1,7 @@
 // src/controllers/rideRequestOffer.controller.ts
 import type { Response } from "express"
 import prisma from "../lib/prisma.js"
+import { expireStaleJitRideRequests } from "../lib/jitRideRequests.js"
 import { AuthRequest } from "../middleware/auth.js"
 import { notifyUser, notifyUsersByIds } from "../lib/notifications.js"
 
@@ -36,6 +37,8 @@ export async function createRideRequestOffer(req: AuthRequest, res: Response) {
         .status(400)
         .json({ error: "rideRequestId and rideId are required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId })
 
     const [rideRequest, ride] = await Promise.all([
       prisma.rideRequest.findUnique({ where: { id: rideRequestId } }),
@@ -190,6 +193,8 @@ export async function listRideRequestOffers(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "rideRequestId is required" })
     }
 
+    await expireStaleJitRideRequests({ rideRequestId })
+
     const rideRequest = await prisma.rideRequest.findUnique({
       where: { id: rideRequestId },
     })
@@ -246,6 +251,8 @@ export async function listMyRideRequestOffers(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Unauthorized" })
     }
 
+    await expireStaleJitRideRequests()
+
     const offers = await prisma.rideRequestOffer.findMany({
       where: { driverId: req.userId },
       orderBy: { createdAt: "desc" },
@@ -293,6 +300,8 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
         .status(400)
         .json({ error: "rideRequestId and offerId are required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId })
 
     const offer = await prisma.rideRequestOffer.findUnique({
       where: { id: offerId },
@@ -482,6 +491,8 @@ export async function rejectRideRequestOffer(req: AuthRequest, res: Response) {
         .json({ error: "rideRequestId and offerId are required" })
     }
 
+    await expireStaleJitRideRequests({ rideRequestId })
+
     const offer = await prisma.rideRequestOffer.findUnique({
       where: { id: offerId },
       include: { rideRequest: true },
@@ -544,6 +555,8 @@ export async function cancelRideRequestOffer(req: AuthRequest, res: Response) {
         .status(400)
         .json({ error: "rideRequestId and offerId are required" })
     }
+
+    await expireStaleJitRideRequests({ rideRequestId })
 
     const offer = await prisma.rideRequestOffer.findUnique({
       where: { id: offerId },

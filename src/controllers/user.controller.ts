@@ -473,6 +473,7 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
               driverId: true,
               fromCity: true,
               toCity: true,
+              startTime: true,
               seatsAvailable: true,
               seatsTotal: true,
             },
@@ -585,6 +586,7 @@ export async function deleteMyAccount(req: AuthRequest, res: Response) {
             paymentStatus: booking.paymentStatus,
             stripePaymentIntentId: booking.stripePaymentIntentId,
             source: "passenger_cancel_booking",
+            rideStartTime: booking.ride.startTime,
           })
         )
       )

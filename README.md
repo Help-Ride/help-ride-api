@@ -120,7 +120,9 @@ STRIPE_CONNECT_RETURN_URL="https://api.example.com/api/stripe/connect/return"
 # Recommended: dedicated secret for signed Stripe Connect state token
 STRIPE_CONNECT_STATE_SECRET="replace-with-strong-secret"
 # Optional app handoff URL (deep link / universal link target)
-# STRIPE_CONNECT_APP_RETURN_URL="https://app.example.com/stripe/return"
+# STRIPE_CONNECT_APP_RETURN_URL="helpride://stripe/return"
+# Use a public or LAN-reachable API URL for STRIPE_CONNECT_REFRESH_URL /
+# STRIPE_CONNECT_RETURN_URL on physical phones. `localhost` only works in the iOS simulator.
 # Optional (default: CA)
 # STRIPE_CONNECT_COUNTRY="CA"
 # Optional business profile prefill for Connect onboarding
@@ -155,6 +157,8 @@ REALTIME_TO_API_SECRET="rts_xxx"
 # RIDE_PRICING_ONTIME_MULTIPLIER=1.12
 # RIDE_PRICING_ASSUMED_SPEED_KMH=60
 # RIDE_PRICING_MIN_DURATION_MINUTES=10
+# Optional JIT request timeout before auto-expire/refund (minutes)
+# JIT_RIDE_REQUEST_EXPIRY_MINUTES=20
 
 # App
 NODE_ENV="development"        # or "production"
@@ -555,13 +559,13 @@ Single-car model for now (one `DriverProfile` per `User`).
   "carModel": "Corolla",
   "carYear": "2020",
   "carColor": "White",
-  "plateNumber": "ABC-123",
-  "licenseNumber": "LIC-987654",
-  "insuranceInfo": "Intact Insurance - Policy #123456"
+  "plateNumber": "ABC-123"
 }
 ```
 
 - Creates `DriverProfile` for the current user and flips `roleDefault` to `driver` if needed.
+- `licenseNumber` and `insuranceInfo` are optional metadata fields.
+- License and insurance verification for onboarding should rely on uploaded documents.
 
 ### Get Driver Profile
 
@@ -730,7 +734,8 @@ Used when no matching ride exists and passengers want to post what they need.
 
 - For departure times within 2 hours.
 - Creates a payment intent first.
-- On successful Stripe webhook, the API creates a `RideRequest` with `mode = "JIT"` and dispatches it to realtime matching.
+- On successful Stripe webhook, the API creates a `RideRequest` with `mode = "JIT"`, persists the paid request state, and dispatches it to realtime matching.
+- If no driver is matched before the JIT timeout window or departure time, the request auto-expires and Stripe refund is initiated.
 
 ### Create Ride Request
 
@@ -877,7 +882,8 @@ Passenger booking → driver approval → seats updated.
 `DELETE /api/bookings/:id` (alias)
 
 - Marks `status = "cancelled_by_passenger"`.
-- If payment was already completed, initiates Stripe refund automatically.
+- If payment was already completed and the passenger cancels more than 2 hours before departure, initiates Stripe refund automatically.
+- Passenger cancellations within 2 hours of departure do not initiate a refund.
 
 ---
 

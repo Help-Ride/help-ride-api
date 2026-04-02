@@ -4,24 +4,30 @@ import { stripe } from "./stripe.js"
 
 const PAID_BOOKING_PAYMENT_STATUSES = new Set(["paid", "succeeded"])
 const ALREADY_REFUNDED_STATUSES = new Set(["refunded"])
+const PASSENGER_BOOKING_REFUND_WINDOW_MS = 2 * 60 * 60 * 1000
 
 export type RefundSource =
   | "passenger_cancel_booking"
   | "driver_cancel_booking"
   | "driver_cancel_ride"
   | "passenger_cancel_ride_request"
+  | "jit_request_expired"
 
 export interface InitiateBookingRefundInput {
   bookingId: string
   paymentStatus: string
   stripePaymentIntentId: string | null
   source: RefundSource
+  rideStartTime?: Date | null
 }
 
 export interface InitiateRideRequestRefundInput {
   rideRequestId: string
   stripePaymentIntentId: string | null
-  source: Extract<RefundSource, "passenger_cancel_ride_request">
+  source: Extract<
+    RefundSource,
+    "passenger_cancel_ride_request" | "jit_request_expired"
+  >
 }
 
 function isAlreadyRefundedStripeError(err: unknown) {
@@ -41,6 +47,7 @@ export async function initiateBookingRefundIfPaid({
   paymentStatus,
   stripePaymentIntentId,
   source,
+  rideStartTime,
 }: InitiateBookingRefundInput) {
   if (ALREADY_REFUNDED_STATUSES.has(paymentStatus)) {
     return { refunded: false, reason: "already_refunded" as const }
@@ -50,18 +57,53 @@ export async function initiateBookingRefundIfPaid({
     return { refunded: false, reason: "not_paid" as const }
   }
 
+  if (source === "passenger_cancel_booking") {
+    if (!rideStartTime) {
+      throw new Error(
+        `Booking ${bookingId} passenger refund check requires rideStartTime`
+      )
+    }
+
+    const startsInMs = rideStartTime.getTime() - Date.now()
+    if (startsInMs <= PASSENGER_BOOKING_REFUND_WINDOW_MS) {
+      console.info(
+        "[payments] Refund skipped for late passenger cancellation",
+        JSON.stringify({
+          bookingId,
+          rideStartTime: rideStartTime.toISOString(),
+          startsInMs,
+          source,
+        })
+      )
+
+      return {
+        refunded: false,
+        reason: "outside_refund_window" as const,
+      }
+    }
+  }
+
   if (!stripePaymentIntentId) {
     throw new Error(
       `Booking ${bookingId} is paid but missing stripePaymentIntentId`
     )
   }
 
-  const existingPayment = await prisma.payment.findUnique({
-    where: { paymentIntentId: stripePaymentIntentId },
-    select: { status: true },
-  })
+  const [existingPayment, existingRideRequestPayment] = await Promise.all([
+    prisma.payment.findUnique({
+      where: { paymentIntentId: stripePaymentIntentId },
+      select: { status: true },
+    }),
+    prisma.rideRequestPayment.findUnique({
+      where: { paymentIntentId: stripePaymentIntentId },
+      select: { status: true },
+    }),
+  ])
 
-  if (existingPayment?.status === "refunded") {
+  if (
+    existingPayment?.status === "refunded" ||
+    existingRideRequestPayment?.status === "refunded"
+  ) {
     return { refunded: false, reason: "already_refunded" as const }
   }
 
