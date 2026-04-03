@@ -11,11 +11,19 @@ interface PresignBody {
   mimeType?: string
 }
 
-const DRIVER_DOCUMENT_TYPES = ["license", "insurance", "ownership", "other"] as const
+const DRIVER_DOCUMENT_TYPES = [
+  "license",
+  "insurance",
+  "selfie",
+  "ownership",
+  "other",
+] as const
 type DriverDocumentType = (typeof DRIVER_DOCUMENT_TYPES)[number]
 
 const DRIVER_DOCUMENT_TYPE_ALIASES: Record<string, DriverDocumentType> = {
   registration: "ownership",
+  driver_selfie: "selfie",
+  photo_selfie: "selfie",
 }
 
 function resolveCurrentDriverUserId(req: AuthRequest, res: Response): string | null {
@@ -46,6 +54,21 @@ function normalizeDriverDocumentType(input?: string): DriverDocumentType | null 
   return DRIVER_DOCUMENT_TYPE_ALIASES[type] ?? null
 }
 
+function buildProfileAvatarProxyUrl(req: AuthRequest, userId: string, s3Key: string) {
+  const forwardedProto = req.header("x-forwarded-proto")?.split(",")[0]?.trim()
+  const forwardedHost = req.header("x-forwarded-host")?.split(",")[0]?.trim()
+  const protocol = forwardedProto || req.protocol
+  const host = forwardedHost || req.get("host")
+  const encodedKey = encodeURIComponent(s3Key)
+  const path = `/api/users/${userId}/avatar?key=${encodedKey}`
+
+  if (!host) {
+    return path
+  }
+
+  return `${protocol}://${host}${path}`
+}
+
 /**
  * POST /api/drivers/me/documents/presign
  * Legacy alias: POST /api/drivers/:id/documents/presign
@@ -72,7 +95,7 @@ export async function createDriverDocumentPresign(
     if (!type) {
       return res.status(400).json({
         error:
-          "Invalid type. Allowed: license, insurance, ownership, other (registration is accepted as ownership).",
+          "Invalid type. Allowed: license, insurance, selfie, ownership, other (registration is accepted as ownership).",
       })
     }
 
@@ -91,6 +114,15 @@ export async function createDriverDocumentPresign(
         status: "pending",
       },
     })
+
+    if (type === "selfie") {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          providerAvatarUrl: buildProfileAvatarProxyUrl(req, userId, key),
+        },
+      })
+    }
 
     const uploadUrl = await getUploadUrl({
       key,

@@ -88,6 +88,13 @@ function extractAvatarS3Key(userId: string, rawUrl: string | null | undefined) {
   }
 }
 
+function isAllowedAvatarS3Key(userId: string, key: string) {
+  return (
+    key.startsWith(`users/${userId}/avatar/`) ||
+    key.startsWith(`drivers/${userId}/selfie/`)
+  )
+}
+
 function uniqueIds(values: Array<string | null | undefined>) {
   return Array.from(
     new Set(
@@ -218,7 +225,7 @@ export async function getUserAvatar(req: AuthRequest, res: Response) {
     if (!key) {
       return res.status(400).json({ error: "key is required" })
     }
-    if (!key.startsWith(`users/${id}/avatar/`)) {
+    if (!isAllowedAvatarS3Key(id, key)) {
       return res.status(400).json({ error: "Invalid avatar key" })
     }
 

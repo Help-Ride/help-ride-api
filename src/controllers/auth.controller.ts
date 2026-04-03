@@ -130,6 +130,46 @@ const TEST_PHONE_OTP_CODE = process.env.TEST_PHONE_OTP_CODE?.trim() || "123456"
 class LocationValidationError extends Error {}
 class PhoneValidationError extends Error {}
 
+function extractAvatarKey(rawUrl: string | null | undefined) {
+  const value = rawUrl?.trim()
+  if (!value) return null
+
+  if (value.startsWith("users/") || value.startsWith("drivers/")) {
+    return value
+  }
+
+  try {
+    const parsed = new URL(value, "https://help-ride.invalid")
+    const key = parsed.searchParams.get("key")?.trim()
+    if (!key) return null
+    return decodeURIComponent(key)
+  } catch {
+    return null
+  }
+}
+
+function isManagedAvatarKey(userId: string, key: string) {
+  return (
+    key.startsWith(`users/${userId}/avatar/`) ||
+    key.startsWith(`drivers/${userId}/selfie/`)
+  )
+}
+
+function buildAvatarProxyUrl(req: AuthRequest, userId: string, s3Key: string) {
+  const forwardedProto = req.header("x-forwarded-proto")?.split(",")[0]?.trim()
+  const forwardedHost = req.header("x-forwarded-host")?.split(",")[0]?.trim()
+  const protocol = forwardedProto || req.protocol
+  const host = forwardedHost || req.get("host")
+  const encodedKey = encodeURIComponent(s3Key)
+  const path = `/api/users/${userId}/avatar?key=${encodedKey}`
+
+  if (!host) {
+    return path
+  }
+
+  return `${protocol}://${host}${path}`
+}
+
 function buildMissingAccountResponse(identifierType: "email" | "phone") {
   return {
     error:
@@ -1931,6 +1971,38 @@ export async function getMe(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: "User not found" })
     }
 
+    let providerAvatarUrl = user.providerAvatarUrl
+    const currentAvatarKey = extractAvatarKey(providerAvatarUrl)
+    const shouldBackfillSelfieAvatar =
+      !currentAvatarKey || !isManagedAvatarKey(req.userId, currentAvatarKey)
+
+    if (shouldBackfillSelfieAvatar) {
+      const latestSelfie = await prisma.driverDocument.findFirst({
+        where: {
+          userId: req.userId,
+          type: "selfie",
+          status: { not: "rejected" },
+        },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        select: { s3Key: true },
+      })
+
+      if (latestSelfie?.s3Key) {
+        providerAvatarUrl = buildAvatarProxyUrl(
+          req,
+          req.userId,
+          latestSelfie.s3Key
+        )
+
+        if (providerAvatarUrl !== user.providerAvatarUrl) {
+          await prisma.user.update({
+            where: { id: req.userId },
+            data: { providerAvatarUrl },
+          })
+        }
+      }
+    }
+
     return res.json({
       id: user.id,
       name: user.name,
@@ -1948,7 +2020,7 @@ export async function getMe(req: AuthRequest, res: Response) {
       appleProviderId: user.appleProviderId,
       googleProviderId: user.googleProviderId,
       roleDefault: user.roleDefault,
-      providerAvatarUrl: user.providerAvatarUrl,
+      providerAvatarUrl,
       driverProfile: user.driverProfile,
     })
   } catch (err) {

@@ -1,6 +1,7 @@
 import type { Request, Response } from "express"
 import type { SupportTicketStatus } from "../generated/prisma/enums.js"
 import prisma from "../lib/prisma.js"
+import { getDownloadUrl } from "../lib/s3.js"
 
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
@@ -16,6 +17,17 @@ interface CreateSupportTicketAdminBody {
   relatedUserId?: string
   subject?: string
   description?: string
+}
+
+async function serializeSupportTicket<
+  T extends { attachmentS3Key: string | null }
+>(ticket: T) {
+  return {
+    ...ticket,
+    attachmentUrl: ticket.attachmentS3Key
+      ? await getDownloadUrl(ticket.attachmentS3Key)
+      : null,
+  }
 }
 
 interface UpdateAppConfigBody {
@@ -59,7 +71,10 @@ export async function listSupportTicketsAdmin(req: Request, res: Response) {
 
     const nextCursor = tickets.length > 0 ? tickets[tickets.length - 1].id : null
 
-    return res.json({ tickets, nextCursor })
+    return res.json({
+      tickets: await Promise.all(tickets.map((ticket) => serializeSupportTicket(ticket))),
+      nextCursor,
+    })
   } catch (err) {
     console.error("GET /admin/support-tickets error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -94,7 +109,7 @@ export async function getSupportTicketAdmin(req: Request, res: Response) {
       return res.status(404).json({ error: "Ticket not found" })
     }
 
-    return res.json(ticket)
+    return res.json(await serializeSupportTicket(ticket))
   } catch (err) {
     console.error("GET /admin/support-tickets/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -145,7 +160,9 @@ export async function createSupportTicketAdmin(req: Request, res: Response) {
       },
     })
 
-    return res.status(201).json({ ticket })
+    return res.status(201).json({
+      ticket: await serializeSupportTicket(ticket),
+    })
   } catch (err) {
     console.error("POST /admin/support-tickets error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -194,7 +211,7 @@ export async function updateSupportTicketAdmin(req: Request, res: Response) {
       },
     })
 
-    return res.json(updated)
+    return res.json(await serializeSupportTicket(updated))
   } catch (err) {
     console.error("PATCH /admin/support-tickets/:id error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -230,7 +247,7 @@ export async function resolveSupportTicketAdmin(req: Request, res: Response) {
       },
     })
 
-    return res.json({ ticket: updated })
+    return res.json({ ticket: await serializeSupportTicket(updated) })
   } catch (err) {
     console.error("POST /admin/support-tickets/:id/resolve error", err)
     return res.status(500).json({ error: "Internal server error" })

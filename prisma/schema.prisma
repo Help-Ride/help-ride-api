@@ -86,6 +86,7 @@ enum DevicePlatform {
 enum DriverDocumentType {
   license
   insurance
+  selfie
   ownership
   other
 }
@@ -547,6 +548,7 @@ model SupportTicket {
   userId        String
   subject       String
   description   String
+  attachmentS3Key String?
   status        SupportTicketStatus @default(open)
   adminResponse String?
   createdAt     DateTime            @default(now())

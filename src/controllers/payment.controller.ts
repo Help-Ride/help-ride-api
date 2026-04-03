@@ -12,6 +12,7 @@ import {
 
 interface CreatePaymentIntentBody {
   bookingId?: string
+  savePaymentMethod?: boolean | string | null
 }
 
 const CURRENCY = "cad"
@@ -27,6 +28,19 @@ function mapIntentStatusToPaymentStatus(
     return "failed"
   }
   return "pending"
+}
+
+function parseSavePaymentMethod(value: unknown) {
+  if (typeof value === "boolean") {
+    return value
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) {
+      return true
+    }
+  }
+  return false
 }
 
 function upsertPaymentRecordFromIntent({
@@ -139,7 +153,9 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       return res.status(401).json({ error: "Unauthorized" })
     }
 
-    const { bookingId } = (req.body ?? {}) as CreatePaymentIntentBody
+    const { bookingId, savePaymentMethod: savePaymentMethodRaw } =
+      (req.body ?? {}) as CreatePaymentIntentBody
+    const savePaymentMethod = parseSavePaymentMethod(savePaymentMethodRaw)
 
     if (!bookingId) {
       return res.status(400).json({ error: "bookingId is required" })
@@ -223,7 +239,9 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       return res.status(400).json({ error: "Invalid platform fee" })
     }
 
-    const customerContext = await createPaymentSheetCustomerContext(req.userId)
+    const customerContext = savePaymentMethod
+      ? await createPaymentSheetCustomerContext(req.userId)
+      : null
 
     if (booking.stripePaymentIntentId) {
       try {
@@ -232,10 +250,24 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
         )
         const existingCustomerId = extractCustomerId(existingIntent.customer)
 
-        if (
-          existingCustomerId == null ||
-          existingCustomerId === customerContext.customerId
-        ) {
+        if (savePaymentMethod) {
+          if (
+            customerContext == null ||
+            (existingCustomerId != null &&
+              existingCustomerId !== customerContext.customerId)
+          ) {
+            console.warn(
+              "[payments] Existing payment intent belongs to a different customer, creating a new one",
+              JSON.stringify({
+                bookingId: booking.id,
+                paymentIntentId: existingIntent.id,
+                existingCustomerId,
+                expectedCustomerId: customerContext?.customerId ?? null,
+              })
+            )
+            throw new Error("Payment intent customer mismatch")
+          }
+
           const shouldSyncSavedPaymentContext =
             existingCustomerId == null ||
             existingIntent.setup_future_usage == null
@@ -249,17 +281,19 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
               }
             )
           }
-        } else {
+        } else if (
+          existingCustomerId != null ||
+          existingIntent.setup_future_usage != null
+        ) {
           console.warn(
-            "[payments] Existing payment intent belongs to a different customer, creating a new one",
+            "[payments] Existing payment intent was created with save-payment consent, creating a new one",
             JSON.stringify({
               bookingId: booking.id,
               paymentIntentId: existingIntent.id,
               existingCustomerId,
-              expectedCustomerId: customerContext.customerId,
             })
           )
-          throw new Error("Payment intent customer mismatch")
+          throw new Error("Payment intent save consent mismatch")
         }
 
         if (existingIntent.status !== "canceled") {
@@ -316,11 +350,16 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
             paymentIntentId: existingIntent.id,
             amount: existingAmountCents,
             currency: existingIntent.currency ?? CURRENCY,
-            customerId: customerContext.customerId,
-            customerEphemeralKeySecret:
-              customerContext.customerEphemeralKeySecret,
+            ...(savePaymentMethod && customerContext != null
+              ? {
+                  customerId: customerContext.customerId,
+                  customerEphemeralKeySecret:
+                    customerContext.customerEphemeralKeySecret,
+                }
+              : {}),
             helpRideFeeCents: existingPlatformFeeCents,
             driverEarningsCents: existingAmountCents - existingPlatformFeeCents,
+            savePaymentMethod,
           })
         }
       } catch (err) {
@@ -335,12 +374,10 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       }
     }
 
-    const paymentIntent = await stripe.paymentIntents.create({
+    const paymentIntentPayload: Stripe.PaymentIntentCreateParams = {
       amount: fareCents,
       currency: CURRENCY,
-      customer: customerContext.customerId,
       automatic_payment_methods: { enabled: true },
-      setup_future_usage: "on_session",
       metadata: {
         bookingId: booking.id,
         passengerId: booking.passengerId,
@@ -353,9 +390,17 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
         taxCents: String(breakdown.taxCents),
         helpRideFeeCents: String(platformFeeCents),
         driverEarningsCents: String(driverEarningsCents),
+        savePaymentMethod: String(savePaymentMethod),
       },
-    }, {
-      idempotencyKey: `booking:${booking.id}:intent:v2`,
+    }
+
+    if (savePaymentMethod && customerContext != null) {
+      paymentIntentPayload.customer = customerContext.customerId
+      paymentIntentPayload.setup_future_usage = "on_session"
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentPayload, {
+      idempotencyKey: `booking:${booking.id}:intent:${savePaymentMethod ? "save" : "one_time"}:v3`,
     })
 
     if (!paymentIntent.client_secret) {
@@ -403,10 +448,16 @@ export async function createPaymentIntent(req: AuthRequest, res: Response) {
       paymentIntentId: paymentIntent.id,
       amount: paymentIntent.amount,
       currency: paymentIntent.currency,
-      customerId: customerContext.customerId,
-      customerEphemeralKeySecret: customerContext.customerEphemeralKeySecret,
+      ...(savePaymentMethod && customerContext != null
+        ? {
+            customerId: customerContext.customerId,
+            customerEphemeralKeySecret:
+              customerContext.customerEphemeralKeySecret,
+          }
+        : {}),
       helpRideFeeCents: platformFeeCents,
       driverEarningsCents,
+      savePaymentMethod,
     })
   } catch (err) {
     console.error("POST /payments/intent error", err)
