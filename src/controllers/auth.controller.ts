@@ -116,9 +116,59 @@ const AUTH_OTP_MAX_SENDS_PER_IDENTIFIER_WINDOW = 5
 const AUTH_OTP_MAX_SENDS_PER_IP_WINDOW = 12
 const AUTH_OTP_MAX_SENDS_PER_DEVICE_WINDOW = 8
 const AUTH_OTP_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000
+const TEST_PHONE_OTP_ENABLED =
+  String(
+    process.env.TEST_PHONE_OTP_ENABLED ??
+      (process.env.NODE_ENV === "production" ? "false" : "true"),
+  )
+    .trim()
+    .toLowerCase() === "true"
+const TEST_PHONE_OTP_PHONE =
+  process.env.TEST_PHONE_OTP_PHONE?.trim() || "+11111111111"
+const TEST_PHONE_OTP_CODE = process.env.TEST_PHONE_OTP_CODE?.trim() || "123456"
 
 class LocationValidationError extends Error {}
 class PhoneValidationError extends Error {}
+
+function extractAvatarKey(rawUrl: string | null | undefined) {
+  const value = rawUrl?.trim()
+  if (!value) return null
+
+  if (value.startsWith("users/") || value.startsWith("drivers/")) {
+    return value
+  }
+
+  try {
+    const parsed = new URL(value, "https://help-ride.invalid")
+    const key = parsed.searchParams.get("key")?.trim()
+    if (!key) return null
+    return decodeURIComponent(key)
+  } catch {
+    return null
+  }
+}
+
+function isManagedAvatarKey(userId: string, key: string) {
+  return (
+    key.startsWith(`users/${userId}/avatar/`) ||
+    key.startsWith(`drivers/${userId}/selfie/`)
+  )
+}
+
+function buildAvatarProxyUrl(req: AuthRequest, userId: string, s3Key: string) {
+  const forwardedProto = req.header("x-forwarded-proto")?.split(",")[0]?.trim()
+  const forwardedHost = req.header("x-forwarded-host")?.split(",")[0]?.trim()
+  const protocol = forwardedProto || req.protocol
+  const host = forwardedHost || req.get("host")
+  const encodedKey = encodeURIComponent(s3Key)
+  const path = `/api/users/${userId}/avatar?key=${encodedKey}`
+
+  if (!host) {
+    return path
+  }
+
+  return `${protocol}://${host}${path}`
+}
 
 function buildMissingAccountResponse(identifierType: "email" | "phone") {
   return {
@@ -313,6 +363,48 @@ function parsePhoneOrThrow(value: unknown) {
   }
 
   return normalized
+}
+
+function isTestPhoneOtpNumber(phone: string) {
+  return TEST_PHONE_OTP_ENABLED && phone === TEST_PHONE_OTP_PHONE
+}
+
+function generatePhoneOtp(params: {
+  phone: string
+  authFlow?: boolean
+}): {
+  otp: string
+  expiresAt: Date
+  resendAvailableAt: Date | null
+} {
+  if (!isTestPhoneOtpNumber(params.phone)) {
+    if (params.authFlow) {
+      return generateAuthOtp()
+    }
+
+    const generated = generateEmailOtp()
+    return {
+      ...generated,
+      resendAvailableAt: null,
+    }
+  }
+
+  const now = Date.now()
+  const expiresAt = new Date(
+    now + (params.authFlow ? AUTH_OTP_TTL_MS : 10 * 60 * 1000),
+  )
+
+  return params.authFlow
+    ? {
+        otp: TEST_PHONE_OTP_CODE,
+        expiresAt,
+        resendAvailableAt: new Date(now + AUTH_OTP_RESEND_COOLDOWN_MS),
+      }
+    : {
+        otp: TEST_PHONE_OTP_CODE,
+        expiresAt,
+        resendAvailableAt: null,
+      }
 }
 
 function isValidLatitude(value: number) {
@@ -683,7 +775,17 @@ async function createAuthChallenge(params: {
     return { error: rateLimit }
   }
 
-  const generated = generateAuthOtp()
+  const generated: {
+    otp: string
+    expiresAt: Date
+    resendAvailableAt: Date | null
+  } =
+    params.channel === "phone"
+      ? generatePhoneOtp({
+          phone: params.identifier,
+          authFlow: true,
+        })
+      : generateAuthOtp()
   const challenge = await prisma.authChallenge.create({
     data: {
       channel: params.channel,
@@ -691,7 +793,7 @@ async function createAuthChallenge(params: {
       userId: params.userId ?? null,
       otp: hashToken(generated.otp),
       expiresAt: generated.expiresAt,
-      resendAvailableAt: generated.resendAvailableAt,
+      resendAvailableAt: generated.resendAvailableAt!,
       requestedFromIp: params.requestedFromIp,
       requestedFromDevice: params.requestedFromDevice,
     },
@@ -1325,7 +1427,9 @@ export async function sendLoginPhoneOtp(req: AuthRequest, res: Response) {
       return res.status(404).json(buildMissingAccountResponse("phone"))
     }
 
-    const { otp, expiresAt } = generateEmailOtp()
+    const { otp, expiresAt } = generatePhoneOtp({
+      phone: normalizedPhone,
+    })
 
     const updated = await prisma.user.update({
       where: { id: user.id },
@@ -1336,11 +1440,13 @@ export async function sendLoginPhoneOtp(req: AuthRequest, res: Response) {
       },
     })
 
-    await sendPhoneVerificationOtpSms({
-      phone: updated.phone ?? normalizedPhone,
-      name: updated.name,
-      otp,
-    })
+    if (!isTestPhoneOtpNumber(normalizedPhone)) {
+      await sendPhoneVerificationOtpSms({
+        phone: updated.phone ?? normalizedPhone,
+        name: updated.name,
+        otp,
+      })
+    }
 
     return res.status(200).json({
       message: "Sign-in OTP sent.",
@@ -1396,10 +1502,12 @@ export async function sendContinuePhoneOtp(req: AuthRequest, res: Response) {
       return res.status(created.error.status).json(created.error.body)
     }
 
-    await sendAuthOtpSms({
-      phone: normalizedPhone,
-      otp: created.otp!,
-    })
+    if (!isTestPhoneOtpNumber(normalizedPhone)) {
+      await sendAuthOtpSms({
+        phone: normalizedPhone,
+        otp: created.otp!,
+      })
+    }
 
     logAuthEvent("otp_sent", {
       channel: "phone",
@@ -1863,6 +1971,38 @@ export async function getMe(req: AuthRequest, res: Response) {
       return res.status(404).json({ error: "User not found" })
     }
 
+    let providerAvatarUrl = user.providerAvatarUrl
+    const currentAvatarKey = extractAvatarKey(providerAvatarUrl)
+    const shouldBackfillSelfieAvatar =
+      !currentAvatarKey || !isManagedAvatarKey(req.userId, currentAvatarKey)
+
+    if (shouldBackfillSelfieAvatar) {
+      const latestSelfie = await prisma.driverDocument.findFirst({
+        where: {
+          userId: req.userId,
+          type: "selfie",
+          status: { not: "rejected" },
+        },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        select: { s3Key: true },
+      })
+
+      if (latestSelfie?.s3Key) {
+        providerAvatarUrl = buildAvatarProxyUrl(
+          req,
+          req.userId,
+          latestSelfie.s3Key
+        )
+
+        if (providerAvatarUrl !== user.providerAvatarUrl) {
+          await prisma.user.update({
+            where: { id: req.userId },
+            data: { providerAvatarUrl },
+          })
+        }
+      }
+    }
+
     return res.json({
       id: user.id,
       name: user.name,
@@ -1880,7 +2020,7 @@ export async function getMe(req: AuthRequest, res: Response) {
       appleProviderId: user.appleProviderId,
       googleProviderId: user.googleProviderId,
       roleDefault: user.roleDefault,
-      providerAvatarUrl: user.providerAvatarUrl,
+      providerAvatarUrl,
       driverProfile: user.driverProfile,
     })
   } catch (err) {
@@ -2183,7 +2323,9 @@ export async function sendPhoneVerifyOtp(req: AuthRequest, res: Response) {
       })
     }
 
-    const { otp, expiresAt } = generateEmailOtp()
+    const { otp, expiresAt } = generatePhoneOtp({
+      phone: normalizedPhone,
+    })
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -2193,14 +2335,16 @@ export async function sendPhoneVerifyOtp(req: AuthRequest, res: Response) {
       },
     })
 
-    await sendPhoneVerificationOtpSms({
-      phone:
-        updated.pendingPhone === normalizedPhone
-          ? updated.pendingPhone
-          : (updated.phone ?? normalizedPhone),
-      name: updated.name,
-      otp,
-    })
+    if (!isTestPhoneOtpNumber(normalizedPhone)) {
+      await sendPhoneVerificationOtpSms({
+        phone:
+          updated.pendingPhone === normalizedPhone
+            ? updated.pendingPhone
+            : (updated.phone ?? normalizedPhone),
+        name: updated.name,
+        otp,
+      })
+    }
 
     return res.status(200).json({
       message: "Phone verification OTP sent.",
@@ -2243,7 +2387,9 @@ export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
       !user.phoneVerifyOtpExpiresAt ||
       user.phoneVerifyOtpExpiresAt < new Date()
     ) {
-      const { otp: newOtp, expiresAt } = generateEmailOtp()
+      const { otp: newOtp, expiresAt } = generatePhoneOtp({
+        phone: normalizedPhone,
+      })
       await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -2254,17 +2400,19 @@ export async function verifyPhoneWithOtp(req: AuthRequest, res: Response) {
       })
 
       let smsSendFailed = false
-      try {
-        await sendPhoneVerificationOtpSms({
-          phone: verifyingPendingPhone
-            ? (user.pendingPhone ?? normalizedPhone)
-            : (user.phone ?? normalizedPhone),
-          name: user.name,
-          otp: newOtp,
-        })
-      } catch (sendErr) {
-        console.error("Failed to resend phone verification OTP", sendErr)
-        smsSendFailed = true
+      if (!isTestPhoneOtpNumber(normalizedPhone)) {
+        try {
+          await sendPhoneVerificationOtpSms({
+            phone: verifyingPendingPhone
+              ? (user.pendingPhone ?? normalizedPhone)
+              : (user.phone ?? normalizedPhone),
+            name: user.name,
+            otp: newOtp,
+          })
+        } catch (sendErr) {
+          console.error("Failed to resend phone verification OTP", sendErr)
+          smsSendFailed = true
+        }
       }
 
       if (smsSendFailed) {

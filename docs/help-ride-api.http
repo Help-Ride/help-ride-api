@@ -71,6 +71,8 @@ Accept: text/html
 ################################################
 
 ### START PHONE CONTINUE FLOW
+# Test shortcut: send `+11111111111` here, or enter `1111111111` in the app.
+# When TEST_PHONE_OTP is enabled, the OTP is always `123456` and no SMS is sent.
 POST {{baseUrl}}/auth/continue/phone
 Content-Type: application/json
 
@@ -82,6 +84,7 @@ Content-Type: application/json
 ###
 
 ### VERIFY PHONE CONTINUE FLOW
+# Use OTP `123456` for the configured test phone while TEST_PHONE_OTP is enabled.
 POST {{baseUrl}}/auth/continue/phone/verify
 Content-Type: application/json
 
@@ -206,6 +209,7 @@ Content-Type: application/json
 ### SEND PHONE VERIFICATION OTP (SMS)
 # Use `/auth/login-phone/send-otp` from the login screen when you need
 # a missing-account response instead of the generic verification flow.
+# Test shortcut: the configured test phone uses OTP `123456` and skips SMS delivery.
 POST {{baseUrl}}/auth/verify-phone/send-otp
 Content-Type: application/json
 
@@ -218,6 +222,7 @@ Content-Type: application/json
 ### VERIFY PHONE WITH OTP (SMS)
 # Replace {{otp}} with the 6-digit code from SMS.
 # Tokens are returned on success for verification or passwordless login.
+# For the configured test phone while TEST_PHONE_OTP is enabled, use `123456`.
 POST {{baseUrl}}/auth/verify-phone/verify-otp
 Content-Type: application/json
 
@@ -943,7 +948,8 @@ Content-Type: application/json
   "preferredTime": "18:00",
   "seatsNeeded": 1,
   "rideType": "one-time",
-  "tripType": "one-way"
+  "tripType": "one-way",
+  "savePaymentMethod": false
 }
 
 ###
@@ -1211,6 +1217,20 @@ Content-Type: application/json
 
 ###
 
+### 🤳 Get upload URL for driver selfie document
+### Saving a selfie here also updates the user's profile avatar to that same image.
+POST {{baseUrl}}/drivers/me/documents/presign
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "type": "selfie",
+  "fileName": "driver-selfie.jpg",
+  "mimeType": "image/jpeg"
+}
+
+###
+
 ### 📄 List my driver documents
 GET {{baseUrl}}/drivers/me/documents
 Authorization: Bearer {{accessToken}}
@@ -1273,7 +1293,8 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "bookingId": "{{bookingId}}"
+  "bookingId": "{{bookingId}}",
+  "savePaymentMethod": false
 }
 
 ###
@@ -1586,6 +1607,38 @@ Accept: application/json
 GET {{baseUrl}}/admin/search?q=toronto&types=rides,drivers,bookings,users&limit=20
 x-admin-api-key: {{adminApiKey}}
 Accept: application/json
+
+###
+
+### SUPPORT TICKETS (USER)
+GET {{baseUrl}}/support-tickets?status=open&limit=20
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+
+### SUPPORT TICKET ATTACHMENT PRESIGN (USER)
+POST {{baseUrl}}/support-tickets/attachments/presign
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fileName": "support-screenshot.jpg",
+  "mimeType": "image/jpeg"
+}
+
+###
+
+### CREATE SUPPORT TICKET (USER)
+POST {{baseUrl}}/support-tickets
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "subject": "Payment issue",
+  "description": "The payment sheet closed before the confirmation screen appeared.",
+  "attachmentKey": "support-tickets/{{userId}}/attachments/example-support-screenshot.jpg"
+}
 
 ###
 

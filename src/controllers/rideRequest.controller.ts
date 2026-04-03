@@ -1,6 +1,7 @@
 // src/controllers/rideRequest.controller.ts
 import { createHash } from "node:crypto"
 import type { Response } from "express"
+import type Stripe from "stripe"
 import prisma from "../lib/prisma.js"
 import { AuthRequest } from "../middleware/auth.js"
 import {
@@ -39,6 +40,7 @@ interface CreateRideRequestBody {
 
 interface CreateJitRideRequestIntentBody extends CreateRideRequestBody {
   basePricePerSeat?: number
+  savePaymentMethod?: boolean | string | null
 }
 
 interface UpdateRideRequestBody {
@@ -113,6 +115,19 @@ function parseNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function parseSavePaymentMethod(value: unknown) {
+  if (typeof value === "boolean") {
+    return value
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) {
+      return true
+    }
+  }
+  return false
 }
 
 function getHoursUntil(date: Date, reference = new Date()) {
@@ -269,7 +284,6 @@ export async function createRide(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -284,7 +298,6 @@ export async function createRide(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -371,7 +384,9 @@ export async function createJitRideRequestPaymentIntent(
       returnDate,
       returnTime,
       basePricePerSeat,
+      savePaymentMethod: savePaymentMethodRaw,
     } = body
+    const savePaymentMethod = parseSavePaymentMethod(savePaymentMethodRaw)
 
     if (
       !fromCity ||
@@ -493,6 +508,7 @@ export async function createJitRideRequestPaymentIntent(
       returnDate: returnDateValue?.toISOString() ?? "",
       returnTime: returnTime ?? "",
       quotedPricePerSeat: pricing.pricePerSeat.toFixed(2),
+      savePaymentMethod: String(savePaymentMethod),
     }
 
     const idempotencyKey = buildJitIntentIdempotencyKey({
@@ -501,17 +517,24 @@ export async function createJitRideRequestPaymentIntent(
       currency: "cad",
       metadata,
     })
-    const customerContext = await createPaymentSheetCustomerContext(req.userId)
+    const customerContext = savePaymentMethod
+      ? await createPaymentSheetCustomerContext(req.userId)
+      : null
+
+    const paymentIntentPayload: Stripe.PaymentIntentCreateParams = {
+      amount: amountCents,
+      currency: "cad",
+      automatic_payment_methods: { enabled: true },
+      metadata,
+    }
+
+    if (savePaymentMethod && customerContext != null) {
+      paymentIntentPayload.customer = customerContext.customerId
+      paymentIntentPayload.setup_future_usage = "on_session"
+    }
 
     const paymentIntent = await stripe.paymentIntents.create(
-      {
-        amount: amountCents,
-        currency: "cad",
-        customer: customerContext.customerId,
-        automatic_payment_methods: { enabled: true },
-        setup_future_usage: "on_session",
-        metadata,
-      },
+      paymentIntentPayload,
       { idempotencyKey }
     )
 
@@ -524,10 +547,16 @@ export async function createJitRideRequestPaymentIntent(
       paymentIntentId: paymentIntent.id,
       amount: paymentIntent.amount,
       currency: paymentIntent.currency,
-      customerId: customerContext.customerId,
-      customerEphemeralKeySecret: customerContext.customerEphemeralKeySecret,
+      ...(savePaymentMethod && customerContext != null
+        ? {
+            customerId: customerContext.customerId,
+            customerEphemeralKeySecret:
+              customerContext.customerEphemeralKeySecret,
+          }
+        : {}),
       quotedPricePerSeat: pricing.pricePerSeat,
       requestMode: "JIT",
+      savePaymentMethod,
     })
   } catch (err) {
     console.error("POST /ride-requests/jit/intent error", err)
@@ -669,7 +698,6 @@ export async function updateRide(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -914,7 +942,6 @@ export async function listRideRequests(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -1087,7 +1114,6 @@ export async function getRideRequestDetail(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -1095,7 +1121,6 @@ export async function getRideRequestDetail(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -1119,7 +1144,6 @@ export async function getRideRequestDetail(req: AuthRequest, res: Response) {
               select: {
                 id: true,
                 name: true,
-                email: true,
                 providerAvatarUrl: true,
               },
             },
@@ -1159,7 +1183,6 @@ export async function getRideRequestById(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },

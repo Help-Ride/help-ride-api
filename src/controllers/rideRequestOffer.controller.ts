@@ -227,7 +227,6 @@ export async function listRideRequestOffers(req: AuthRequest, res: Response) {
           select: {
             id: true,
             name: true,
-            email: true,
             providerAvatarUrl: true,
           },
         },
@@ -268,7 +267,6 @@ export async function listMyRideRequestOffers(req: AuthRequest, res: Response) {
               select: {
                 id: true,
                 name: true,
-                email: true,
                 providerAvatarUrl: true,
               },
             },
@@ -390,7 +388,6 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
             select: {
               id: true,
               name: true,
-              email: true,
               providerAvatarUrl: true,
             },
           },
@@ -406,7 +403,6 @@ export async function acceptRideRequestOffer(req: AuthRequest, res: Response) {
                 select: {
                   id: true,
                   name: true,
-                  email: true,
                   providerAvatarUrl: true,
                 },
               },

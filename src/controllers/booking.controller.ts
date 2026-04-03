@@ -7,6 +7,7 @@ import { initiateBookingRefundIfPaid } from "../lib/refunds.js"
 
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 100
+const PAID_BOOKING_PAYMENT_STATUSES = new Set(["paid", "succeeded"])
 
 interface CreateBookingBody {
   seats?: number
@@ -43,6 +44,42 @@ function isValidLatitude(value: number) {
 
 function isValidLongitude(value: number) {
   return Number.isFinite(value) && value >= -180 && value <= 180
+}
+
+function isPaidBookingPaymentStatus(value: unknown) {
+  if (typeof value !== "string") {
+    return false
+  }
+
+  return PAID_BOOKING_PAYMENT_STATUSES.has(value.trim().toLowerCase())
+}
+
+function sanitizeBookingContacts<T extends Record<string, any>>(booking: T): T {
+  if (isPaidBookingPaymentStatus(booking?.paymentStatus)) {
+    return booking
+  }
+
+  return {
+    ...booking,
+    passenger: booking?.passenger
+      ? {
+          ...booking.passenger,
+          email: null,
+          phone: null,
+        }
+      : booking?.passenger,
+    ride: booking?.ride
+      ? {
+          ...booking.ride,
+          driver: booking.ride.driver
+            ? {
+                ...booking.ride.driver,
+                email: null,
+              }
+            : booking.ride.driver,
+        }
+      : booking?.ride,
+  } as T
 }
 
 /**
@@ -204,7 +241,7 @@ export async function createBooking(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.status(201).json(booking)
+    return res.status(201).json(sanitizeBookingContacts(booking))
   } catch (err) {
     console.error("POST /bookings/:rideId error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -254,7 +291,7 @@ export async function getMyBookings(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.json(bookings)
+    return res.json(bookings.map((booking) => sanitizeBookingContacts(booking)))
   } catch (err) {
     console.error("GET /bookings/me/list error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -327,7 +364,7 @@ export async function getBookingsForRide(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.json(bookings)
+    return res.json(bookings.map((booking) => sanitizeBookingContacts(booking)))
   } catch (err) {
     console.error("GET /bookings/ride/:rideId error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -427,7 +464,10 @@ export async function getDriverBookingsInbox(req: AuthRequest, res: Response) {
     const nextCursor =
       bookings.length > 0 ? bookings[bookings.length - 1].id : null
 
-    return res.json({ bookings, nextCursor })
+    return res.json({
+      bookings: bookings.map((booking) => sanitizeBookingContacts(booking)),
+      nextCursor,
+    })
   } catch (err) {
     console.error("GET /bookings/driver/me error", err)
     return res.status(500).json({ error: "Internal server error" })
@@ -569,7 +609,7 @@ export async function cancelBookingByPassenger(req: AuthRequest, res: Response) 
     })
 
     return res.json({
-      booking: bookingWithRelations ?? updatedBooking,
+      booking: sanitizeBookingContacts(bookingWithRelations ?? updatedBooking),
       ride: updatedRide,
     })
   } catch (err) {
@@ -713,7 +753,7 @@ export async function cancelBookingByDriver(req: AuthRequest, res: Response) {
     })
 
     return res.json({
-      booking: bookingWithRelations ?? updatedBooking,
+      booking: sanitizeBookingContacts(bookingWithRelations ?? updatedBooking),
       ride: updatedRide,
     })
   } catch (err) {
@@ -834,7 +874,7 @@ export async function confirmBooking(req: AuthRequest, res: Response) {
     })
 
     return res.json({
-      booking: bookingWithRelations ?? updatedBooking,
+      booking: sanitizeBookingContacts(bookingWithRelations ?? updatedBooking),
       ride: updatedRide,
     })
   } catch (err) {
@@ -930,7 +970,7 @@ export async function rejectBooking(req: AuthRequest, res: Response) {
       },
     })
 
-    return res.json(bookingWithRelations ?? updated)
+    return res.json(sanitizeBookingContacts(bookingWithRelations ?? updated))
   } catch (err) {
     console.error("PUT /bookings/:id/reject error", err)
     return res.status(500).json({ error: "Internal server error" })

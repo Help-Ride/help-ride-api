@@ -897,9 +897,15 @@ export async function requestAdditionalDriverDocumentAdmin(
     const documentType = parseNonEmptyString((req.body ?? {}).documentType)?.toLowerCase()
     const reason = parseNonEmptyString((req.body ?? {}).reason)
 
-    if (!documentType || !["license", "insurance", "registration", "ownership"].includes(documentType)) {
+    if (
+      !documentType ||
+      !["license", "insurance", "selfie", "registration", "ownership"].includes(
+        documentType
+      )
+    ) {
       return res.status(400).json({
-        error: "documentType must be one of: license | insurance | registration | ownership",
+        error:
+          "documentType must be one of: license | insurance | selfie | registration | ownership",
       })
     }
 
