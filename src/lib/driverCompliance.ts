@@ -85,7 +85,11 @@ async function hasCompletedStripeSetup(
 
     return Boolean(account.details_submitted)
   } catch (err) {
-    if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+    if (
+      err instanceof Stripe.errors.StripeInvalidRequestError ||
+      (err instanceof Stripe.errors.StripePermissionError &&
+        err.code === "account_invalid")
+    ) {
       return false
     }
 

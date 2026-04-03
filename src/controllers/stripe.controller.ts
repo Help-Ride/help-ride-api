@@ -110,6 +110,17 @@ function isUsingTestStripeKey() {
   return process.env.STRIPE_SECRET_KEY?.trim().startsWith("sk_test_") ?? false
 }
 
+function isRecoverableConnectAccountError(err: unknown) {
+  if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+    return true
+  }
+
+  return (
+    err instanceof Stripe.errors.StripePermissionError &&
+    err.code === "account_invalid"
+  )
+}
+
 function signConnectStateToken(payload: ConnectStatePayload) {
   return jwt.sign(payload, getConnectStateSecret(), {
     expiresIn: CONNECT_STATE_EXPIRES_IN,
@@ -318,7 +329,7 @@ async function getStripeAccountStatusById(stripeAccountId: string) {
       ...mapStripeAccountStatus(account),
     }
   } catch (err) {
-    if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+    if (isRecoverableConnectAccountError(err)) {
       return mapConnectStatusForMissingAccount("account_not_found")
     }
     throw err
@@ -461,11 +472,11 @@ async function getOrCreateConnectAccountForUser(args: {
         }
       }
     } catch (err) {
-      if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) {
+      if (!isRecoverableConnectAccountError(err)) {
         throw err
       }
       console.warn(
-        "[stripe][connect] Existing connected account not found, creating a new one",
+        "[stripe][connect] Existing connected account is inaccessible, creating a new one",
         JSON.stringify({
           userId: args.userId,
           stripeAccountId: args.stripeAccountId,
@@ -621,9 +632,10 @@ export async function createStripeDashboardLink(
     const loginLink = await stripe.accounts.createLoginLink(user.stripeAccountId)
     return res.json({ url: loginLink.url })
   } catch (err) {
-    if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+    if (isRecoverableConnectAccountError(err)) {
       return res.status(409).json({
-        error: "Stripe dashboard is not available yet for this account",
+        error:
+          "Stored Stripe account is no longer accessible. Restart Stripe onboarding to connect a new account.",
       })
     }
     console.error("POST /stripe/connect/dashboard-link error", err)
@@ -696,7 +708,7 @@ export async function resetStripeConnectAccount(
         const deleted = await stripe.accounts.del(previousStripeAccountId)
         deletedFromStripe = Boolean("deleted" in deleted && deleted.deleted)
       } catch (err) {
-        if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+        if (isRecoverableConnectAccountError(err)) {
           deleteSkippedReason = "account_not_found_in_stripe"
         } else {
           throw err
